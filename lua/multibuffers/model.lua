@@ -146,10 +146,4 @@ function M.from_items(items, title)
   return { title = title or 'Multibuffers', files = files }
 end
 
---- Build a source model from the current quickfix list.
-function M.from_qflist()
-  local qf = vim.fn.getqflist({ items = 1, title = 1 })
-  return M.from_items(qf.items, qf.title)
-end
-
 return M

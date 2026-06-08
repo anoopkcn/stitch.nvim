@@ -1,12 +1,12 @@
--- Renders a model into a dedicated, read-only buffer:
---   * one real line per excerpt (the source line text)
---   * file headers as virt_lines (zero bytes, not editable)
---   * source line number shown inline (virt_text)
+-- Paints a source model into a dedicated, editable `acwrite` buffer:
+--   * one real line per excerpt/context line (the source line text)
+--   * file headers and block dividers as virt_lines (zero bytes, not editable)
+--   * source line number shown inline (virt_text), match span underlined
 --   * quickfix annotation (e.g. diagnostic message) at end of line
 --
--- Each excerpt line carries an "anchor" extmark whose id maps back to the
--- source {filename, bufnr, lnum}. This is the stable line address that v0.2's
--- write-back and v0.1's jump-to-source both rely on.
+-- Each line carries an "anchor" extmark whose id maps back to its source
+-- {filename, bufnr, lnum}. That stable line address is what write-back,
+-- jump-to-source, and expand/collapse all rely on.
 local config = require('multibuffers.config')
 local model = require('multibuffers.model')
 
@@ -14,7 +14,10 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace('multibuffers')
 
--- bufnr -> { marks = { [extmark_id] = {filename,bufnr,lnum,col,source} } }
+-- bufnr -> {
+--   marks = { [extmark_id] = { filename, bufnr, lnum, col, source } },
+--   view  = { title, files = { source-model file + .levels }, files_by_name },
+-- }
 M.state = {}
 
 -- Namespace holding the anchor extmarks; the editor reads it to map edited
@@ -141,6 +144,11 @@ function M.close(buf)
   end
 end
 
+-- Stable map key for a (filename, lnum) pair.
+local function key(filename, lnum)
+  return filename .. '\0' .. lnum
+end
+
 -- Flatten the live view (each file materialized for its current levels) into
 -- buffer lines + per-row infos. Row 0 is a blank spacer: Neovim does not render
 -- virt_lines *above* line 0, so reserving it keeps the first file header visible.
@@ -209,12 +217,12 @@ local function paint(buf, st, preserve)
   local pending, pending_n, old_source = {}, 0, {}
   if preserve then
     for id, rec in pairs(st.marks) do
-      old_source[rec.filename .. '\0' .. rec.lnum] = rec.source
+      old_source[key(rec.filename, rec.lnum)] = rec.source
       local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, id, {})
       if pos and pos[1] then
         local cur = vim.api.nvim_buf_get_lines(buf, pos[1], pos[1] + 1, false)[1]
         if cur ~= nil and cur ~= rec.source then
-          pending[rec.filename .. '\0' .. rec.lnum] = cur
+          pending[key(rec.filename, rec.lnum)] = cur
           pending_n = pending_n + 1
         end
       end
@@ -227,7 +235,7 @@ local function paint(buf, st, preserve)
   local kept = 0
   if pending_n > 0 then
     for _, info in ipairs(infos) do
-      local edited = pending[info.filename .. '\0' .. info.lnum]
+      local edited = pending[key(info.filename, info.lnum)]
       if edited ~= nil then
         lines[info.row + 1] = edited
         info.edited = edited
@@ -265,7 +273,7 @@ local function paint(buf, st, preserve)
       col = info.col,
       -- true original (open-time for existing lines, fresh for newly-revealed),
       -- even when the buffer shows an edit
-      source = old_source[info.filename .. '\0' .. info.lnum] or info.source,
+      source = old_source[key(info.filename, info.lnum)] or info.source,
     }
 
     if info.annotation then

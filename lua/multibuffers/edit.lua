@@ -1,7 +1,7 @@
 -- Write-back: on `:w`, diff each excerpt line against its cached original and
 -- apply the changes to the real source files.
 --
--- v0.2 contract is strict 1:1 line mapping:
+-- The contract is strict 1:1 line mapping:
 --   * editing the text of an existing excerpt line is written back
 --   * deleting an excerpt line (its anchor extmark invalidates) is ignored
 --   * lines you insert (no anchor extmark) are ignored
