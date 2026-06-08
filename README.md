@@ -1,15 +1,9 @@
 # excerpts.nvim
 
-View excerpts from many files in a single buffer — Neovim's take on
-[Zed's multibuffers](https://zed.dev/docs/multibuffers).
+View excerpts from many files in a single buffer
 
 Populate one grouped view from a project search, LSP references, or diagnostics,
-read it top-to-bottom, and jump straight to any source line.
-
-> **Status: v0.2 — editable.** Edit excerpt lines in place and `:w` to write the
-> changes back to every source file at once. Strict 1:1 line editing only (see
-> [Editing](#editing)); per-excerpt context and expand/collapse land in v0.3.
-> See [SCOPE.md](SCOPE.md) for the roadmap.
+read/edit and push changes back to the buffers, and jump straight to any source line.
 
 ## Requirements
 
@@ -17,17 +11,6 @@ read it top-to-bottom, and jump straight to any source line.
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) for the grep source
 
 ## Install
-
-With [lazy.nvim](https://github.com/folke/lazy.nvim):
-
-```lua
-{
-  'excerpts.nvim',
-  opts = {}, -- calls require('excerpts').setup()
-}
-```
-
-`setup()` is optional; the plugin works with defaults out of the box.
 
 ## Usage
 
@@ -62,49 +45,6 @@ Inside the view:
 Each excerpt shows its source line number inline; files are separated by a
 header. Diagnostics show their message as a trailing annotation.
 
-## Editing
-
-Edit the buffer with any native command — change text, `dd` a line, `J`, paste,
-split one line into several, `gcc` to comment — then `:w`. Changes are written
-back to the correct source files and all touched files are saved together. There
-are no special key mappings: on save the buffer is diffed against what was
-painted, and each change is mapped back to its source range, so **deletion,
-insertion, and multi-line edits all work**.
-
-`gc`/`gcc` comment in each excerpt's own language — `commentstring` tracks the
-source file under the cursor (Lua with `--`, Python with `#`, …). A single-file
-or single-line comment is exact; a multi-line `gc` spanning *different* languages
-uses the cursor line's syntax (Neovim's built-in commenting applies one
-`commentstring` per invocation).
-
-Guarantees:
-
-- If a source line changed underneath you since the view was opened, that edit
-  is flagged inline (`‹ source changed — not written ›`) and **skipped**, never
-  clobbered.
-- A change that can't be mapped to a single source range — it spans two files,
-  or a structural edit straddles a block boundary — is likewise flagged and
-  skipped rather than guessed at.
-
-After `:w` you get a summary, e.g. `wrote 3 edit(s) in 2 file(s)`, plus any
-skipped counts. Expand/collapse re-lays-out the view, so write (`:w`) any pending
-edits before using `+`/`-`.
-
-> Note: write-back goes through each source buffer and writes it, so saving the
-> excerpts buffer behaves like saving those files directly — it also persists any
-> other unsaved changes in them and triggers their `BufWritePre`/`BufWritePost`
-> autocmds. If you use format-on-save, every touched file is formatted on `:w`.
-
-### Bulk edits
-
-The view is backed by the quickfix list, so Neovim's built-in cross-file edit
-commands work on the same set without any extra plugin code:
-
-```vim
-:cdo s/old/new/ | update     " substitute across every excerpt's line
-:cfdo %s/old/new/g | update  " substitute across every file in the list
-```
-
 ## Configuration
 
 Defaults:
@@ -124,37 +64,6 @@ require('excerpts').setup({
 })
 ```
 
-### Context lines
-
-Set `context = N` to show N source lines above and below each match. Overlapping
-or adjacent context within a file is merged into one block, and a gap between
-blocks is shown as a `⋮ N lines` divider. Context lines are dimmer than match
-lines but are **fully editable** — editing one writes back to its source line
-just like a match. So `context` is also a quick way to edit a few lines around
-each hit without leaving the view.
-
-Press `+` / `-` to grow or shrink the context around the excerpt under the
-cursor (by `context_step` lines, or a count: `10+`). Expanding far enough merges
-neighbouring excerpts; collapsing splits them back. Note: because expand/collapse
-re-lays-out real anchored lines, it **resets the undo history** — any pending
-edits to existing excerpt lines are kept (and still save), but you can't `u`
-across an expand/collapse, and brand-new lines you typed into the view (which
-aren't anchored to a source line, and wouldn't be written by `:w` anyway) are
-dropped.
-
-### Syntax highlighting
-
-Each excerpt is syntax-highlighted with its **source file's** Treesitter
-grammar, so a view mixing Lua, Python and Markdown shows each line in the right
-colours. Each block is parsed in its own language (the grammar is derived from
-the filename — no LSP is started just to colour an excerpt), so edits and
-newly-inserted lines are highlighted live as you type. Files whose language has
-no Treesitter parser render uncoloured. Disable with `highlight = false`.
-
-The matched text itself is marked on top of syntax with a blue underline
-(`ExcerptsMatch`): the exact search span(s) for grep (via `rg --json`), and
-the symbol/diagnostic range for references and diagnostics.
-
 ### Highlight groups
 
 | Group                       | Default link |
@@ -169,7 +78,3 @@ the symbol/diagnostic range for references and diagnostics.
 | `ExcerptsAnnotation`    | `Comment`    |
 | `ExcerptsSeparator`     | `NonText`    |
 
-## Not in scope
-
-Multi-cursor editing across files is intentionally **not** implemented — use
-`:cdo`/`:cfdo` over the quickfix list for bulk changes. See [SCOPE.md](SCOPE.md).
