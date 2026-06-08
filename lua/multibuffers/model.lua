@@ -1,14 +1,10 @@
--- Turns a flat list of quickfix-style items into a grouped, blocked model:
---   { title, files = { { filename, relname, bufnr, blocks = {
---       { lines = { { lnum, source, is_match, col, annotation } } } } } } }
+-- Turns a flat list of quickfix-style items into a per-file "source model":
+--   { title, files = { { filename, relname, bufnr, line_count,
+--       match_lnums = sorted, matches = { lnum -> { col, qftext, spans } } } } }
 --
--- Each match line can be surrounded by `config.context` lines above/below. Per
--- file, the expanded ranges are merged so overlapping/adjacent context is shown
--- once; a gap between blocks becomes a divider at render time. Every line
--- (match or context) maps 1:1 to a source line, so all of them are editable and
--- written back — context lines included.
-local config = require('multibuffers.config')
-
+-- The source model carries no layout. `blocks_from_levels` + `materialize` turn
+-- it into displayable blocks for a given per-match context level, so the view
+-- can be re-laid-out interactively (expand/collapse) without re-querying.
 local M = {}
 
 local function read_lines(filename, bufnr)
@@ -35,11 +31,15 @@ local function resolve_filename(item)
   return nil
 end
 
--- Expand match line numbers by `n` context lines, clamp to the file, and merge
--- overlapping/adjacent ranges. Returns a list of { s, e } (inclusive, 1-based).
-local function blocks_from_matches(match_lnums, n, line_count)
+--- Expand each match by its own context level, clamp to the file, and merge
+--- overlapping/adjacent ranges. Returns a list of { s, e } (inclusive, 1-based).
+--- @param match_lnums integer[] sorted match line numbers
+--- @param levels table<integer,integer> lnum -> context level
+--- @param line_count integer
+function M.blocks_from_levels(match_lnums, levels, line_count)
   local ranges = {}
   for _, ml in ipairs(match_lnums) do
+    local n = levels[ml] or 0
     local s = math.max(1, ml - n)
     local e = math.min(line_count, ml + n)
     if s <= e then
@@ -59,12 +59,44 @@ local function blocks_from_matches(match_lnums, n, line_count)
   return blocks
 end
 
---- Build a grouped, blocked model from quickfix-style items.
---- @param items table[] quickfix items ({ filename|bufnr, lnum, col, text, type })
+--- Materialize a file's blocks for the given levels: read source and build the
+--- per-line records the renderer paints.
+--- @param file_src table source-model entry
+--- @param levels table<integer,integer>
+--- @return table[] blocks  { { lines = { {lnum,source,is_match,col,annotation,spans} } } }
+function M.materialize(file_src, levels)
+  local lines = read_lines(file_src.filename, file_src.bufnr)
+  local blocks = {}
+  for _, range in ipairs(M.blocks_from_levels(file_src.match_lnums, levels, file_src.line_count)) do
+    local block_lines = {}
+    for lnum = range.s, range.e do
+      local match = file_src.matches[lnum]
+      local src = lines[lnum] or ''
+      local annotation
+      if match then
+        local trimmed = vim.trim(match.qftext)
+        if trimmed ~= '' and trimmed ~= vim.trim(src) then
+          annotation = trimmed
+        end
+      end
+      block_lines[#block_lines + 1] = {
+        lnum = lnum,
+        source = src,
+        is_match = match ~= nil,
+        col = match and match.col or 1,
+        annotation = annotation,
+        spans = match and #match.spans > 0 and match.spans or nil,
+      }
+    end
+    blocks[#blocks + 1] = { lines = block_lines }
+  end
+  return blocks
+end
+
+--- Build a per-file source model from quickfix-style items.
+--- @param items table[] quickfix items ({ filename|bufnr, lnum, col, end_col, text })
 --- @param title string|nil
 function M.from_items(items, title)
-  local context = config.options.context or 0
-
   local by_file = {}
   local order = {}
 
@@ -79,14 +111,14 @@ function M.from_items(items, title)
             filename = fname,
             relname = vim.fn.fnamemodify(fname, ':.'),
             bufnr = (it.bufnr and it.bufnr > 0) and it.bufnr or nil,
-            matches = {}, -- lnum -> { col, qftext, type }
+            matches = {}, -- lnum -> { col, qftext, spans }
             match_lnums = {},
           }
           by_file[fname] = f
           order[#order + 1] = fname
         end
         if not f.matches[lnum] then -- one excerpt per source line
-          f.matches[lnum] = { col = it.col or 1, qftext = it.text or '', type = it.type, spans = {} }
+          f.matches[lnum] = { col = it.col or 1, qftext = it.text or '', spans = {} }
           f.match_lnums[#f.match_lnums + 1] = lnum
         end
         -- Accumulate the highlight span for this item. Multiple items can share a
@@ -105,44 +137,16 @@ function M.from_items(items, title)
   for _, fname in ipairs(order) do
     local f = by_file[fname]
     table.sort(f.match_lnums)
-    local lines = read_lines(f.filename, f.bufnr)
-    local line_count = #lines
-
-    local blocks = {}
-    for _, range in ipairs(blocks_from_matches(f.match_lnums, context, line_count)) do
-      local block_lines = {}
-      for lnum = range.s, range.e do
-        local match = f.matches[lnum]
-        local src = lines[lnum] or ''
-        local annotation
-        if match then
-          local trimmed = vim.trim(match.qftext)
-          if trimmed ~= '' and trimmed ~= vim.trim(src) then
-            annotation = trimmed
-          end
-        end
-        block_lines[#block_lines + 1] = {
-          lnum = lnum,
-          source = src,
-          is_match = match ~= nil,
-          col = match and match.col or 1,
-          annotation = annotation,
-          spans = match and #match.spans > 0 and match.spans or nil,
-        }
-      end
-      blocks[#blocks + 1] = { lines = block_lines }
-    end
-
-    if #blocks > 0 then
-      files[#files + 1] =
-        { filename = f.filename, relname = f.relname, bufnr = f.bufnr, blocks = blocks }
+    f.line_count = #read_lines(f.filename, f.bufnr)
+    if f.line_count > 0 then -- skip unreadable/empty files
+      files[#files + 1] = f
     end
   end
 
   return { title = title or 'Multibuffers', files = files }
 end
 
---- Build a model from the current quickfix list.
+--- Build a source model from the current quickfix list.
 function M.from_qflist()
   local qf = vim.fn.getqflist({ items = 1, title = 1 })
   return M.from_items(qf.items, qf.title)

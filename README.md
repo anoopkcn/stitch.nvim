@@ -53,7 +53,11 @@ Inside the view:
 | ------- | ---------------------------------------- |
 | `<CR>`  | open the source file at the line/cursor  |
 | `q`     | close the view                           |
+| `+`     | show more context around this excerpt    |
+| `-`     | show less context around this excerpt    |
 | `:w`    | write all edits back to their source files |
+
+`+`/`-` accept a count: `10+` reveals 10 lines at once.
 
 Each excerpt shows its source line number inline; files are separated by a
 header. Diagnostics show their message as a trailing annotation.
@@ -101,9 +105,12 @@ require('multibuffers').setup({
   window = 'split',  -- 'split' | 'vsplit' | 'tab' | 'current'
   highlight = true,  -- project Treesitter syntax highlighting onto excerpts
   context = 0,       -- lines of source context shown above/below each match
+  context_step = 4,  -- lines added/removed per +/- press (a count overrides it)
   keys = {
     jump = '<CR>',
     close = 'q',
+    expand = '+',
+    collapse = '-',
   },
 })
 ```
@@ -116,6 +123,12 @@ blocks is shown as a `⋮ N lines` divider. Context lines are dimmer than match
 lines but are **fully editable** — editing one writes back to its source line
 just like a match. So `context` is also a quick way to edit a few lines around
 each hit without leaving the view.
+
+Press `+` / `-` to grow or shrink the context around the excerpt under the
+cursor (by `context_step` lines, or a count: `10+`). Expanding far enough merges
+neighbouring excerpts; collapsing splits them back. Note: because expand/collapse
+re-lays-out real anchored lines, it **resets the undo history** — any pending
+edits are kept (and still save), but you can't `u` across an expand/collapse.
 
 ### Syntax highlighting
 

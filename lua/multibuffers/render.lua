@@ -8,6 +8,7 @@
 -- source {filename, bufnr, lnum}. This is the stable line address that v0.2's
 -- write-back and v0.1's jump-to-source both rely on.
 local config = require('multibuffers.config')
+local model = require('multibuffers.model')
 
 local M = {}
 
@@ -102,6 +103,18 @@ local function set_keymaps(buf)
       M.close(buf)
     end, opts)
   end
+  if keys.expand then
+    vim.keymap.set('n', keys.expand, function()
+      local n = vim.v.count
+      require('multibuffers.context').expand(buf, n > 0 and n or nil)
+    end, opts)
+  end
+  if keys.collapse then
+    vim.keymap.set('n', keys.collapse, function()
+      local n = vim.v.count
+      require('multibuffers.context').collapse(buf, n > 0 and n or nil)
+    end, opts)
+  end
 end
 
 --- Look up the source record for a buffer row (0-indexed).
@@ -128,21 +141,16 @@ function M.close(buf)
   end
 end
 
---- Render a model into a new multibuffer view. Returns (buf, win).
-function M.open(model)
-  local buf = vim.api.nvim_create_buf(true, true)
-  local st = { marks = {} }
-  M.state[buf] = st
-
-  -- Flatten the model into buffer lines, remembering each row's source.
-  -- A leading blank line is required: Neovim does not render virt_lines placed
-  -- *above* buffer line 0, so the first file header would be invisible. Reserving
-  -- row 0 puts every header on a content row >= 1, where virt_lines_above renders.
+-- Flatten the live view (each file materialized for its current levels) into
+-- buffer lines + per-row infos. Row 0 is a blank spacer: Neovim does not render
+-- virt_lines *above* line 0, so reserving it keeps the first file header visible.
+local function build_infos(st)
   local lines = { '' }
   local infos = {}
-  for fi, f in ipairs(model.files) do
-    for bi, block in ipairs(f.blocks) do
-      local prev = f.blocks[bi - 1]
+  for fi, f in ipairs(st.view.files) do
+    local blocks = model.materialize(f, f.levels)
+    for bi, block in ipairs(blocks) do
+      local prev = blocks[bi - 1]
       local gap = prev and (block.lines[1].lnum - prev.lines[#prev.lines].lnum - 1) or 0
       for li, line in ipairs(block.lines) do
         local row = #lines
@@ -166,15 +174,77 @@ function M.open(model)
       end
     end
   end
+  return lines, infos
+end
 
-  -- Populate with undo disabled so a single `u` can't wipe the whole view back
-  -- to an empty buffer; user edits after this point undo normally.
+-- Find the buffer row currently showing (filename, lnum); falls back to the
+-- nearest displayed line of the same file. Returns a 0-based row or nil.
+local function row_for(buf, st, filename, lnum)
+  local nearest, nearest_d
+  for id, rec in pairs(st.marks) do
+    if rec.filename == filename then
+      local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, id, {})
+      if pos and pos[1] then
+        if rec.lnum == lnum then
+          return pos[1]
+        end
+        local d = math.abs(rec.lnum - lnum)
+        if not nearest_d or d < nearest_d then
+          nearest_d, nearest = d, pos[1]
+        end
+      end
+    end
+  end
+  return nearest
+end
+
+-- Paint st.view into the buffer. With preserve=true (a repaint), pending edits
+-- to existing excerpt lines are carried over as buffer text while each anchor's
+-- recorded `source` stays the true original, so write-back still diffs correctly.
+local function paint(buf, st, preserve)
+  -- Capture pending edits before the old anchors are cleared.
+  local pending, pending_n = {}, 0
+  if preserve then
+    for id, rec in pairs(st.marks) do
+      local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, id, {})
+      if pos and pos[1] then
+        local cur = vim.api.nvim_buf_get_lines(buf, pos[1], pos[1] + 1, false)[1]
+        if cur ~= nil and cur ~= rec.source then
+          pending[rec.filename .. '\0' .. rec.lnum] = cur
+          pending_n = pending_n + 1
+        end
+      end
+    end
+  end
+
+  local lines, infos = build_infos(st)
+
+  -- Overlay surviving edits onto the new line list.
+  local kept = 0
+  if pending_n > 0 then
+    for _, info in ipairs(infos) do
+      local edited = pending[info.filename .. '\0' .. info.lnum]
+      if edited ~= nil then
+        lines[info.row + 1] = edited
+        info.edited = edited
+        kept = kept + 1
+      end
+    end
+  end
+
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(buf, match_ns, 0, -1)
+  st.marks = {}
+
+  -- Disable undo across the (re)layout: anchors are placed manually and can't
+  -- survive an undo, so this view op is intentionally non-undoable.
   vim.bo[buf].modifiable = true
   local save_undolevels = vim.bo[buf].undolevels
   vim.bo[buf].undolevels = -1
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
   for _, info in ipairs(infos) do
+    local linetext = info.edited or info.source
     -- Anchor extmark + inline source line number. Doubles as the line address.
     -- Match lines get a brighter number than surrounding context lines.
     local lnum_hl = info.is_match and 'MultibuffersLnum' or 'MultibuffersContextLnum'
@@ -189,7 +259,7 @@ function M.open(model)
       bufnr = info.bufnr,
       lnum = info.lnum,
       col = info.col,
-      source = info.source,
+      source = info.source, -- true original, even when buffer shows an edit
     }
 
     if info.annotation then
@@ -213,7 +283,7 @@ function M.open(model)
 
     -- Highlight the matched span(s) on the line, above syntax highlighting.
     if info.spans then
-      local len = #info.source
+      local len = #linetext
       for _, span in ipairs(info.spans) do
         local scol = math.max(0, math.min(span[1], len))
         local ecol = math.max(scol, math.min(span[2], len))
@@ -229,17 +299,44 @@ function M.open(model)
     end
   end
 
+  vim.bo[buf].undolevels = save_undolevels
+  vim.bo[buf].modified = kept > 0
+
+  if pending_n > kept then
+    vim.notify(
+      string.format('multibuffers: %d edit(s) on now-hidden lines discarded', pending_n - kept),
+      vim.log.levels.WARN
+    )
+  end
+end
+
+--- Render a source model into a new multibuffer view. Returns (buf, win).
+function M.open(source)
+  local buf = vim.api.nvim_create_buf(true, true)
+  local st = { marks = {} }
+  M.state[buf] = st
+
+  -- Live view state, mutated by expand/collapse and re-read on repaint.
+  local files, by_name = {}, {}
+  for _, f in ipairs(source.files) do
+    f.levels = {}
+    for _, ml in ipairs(f.match_lnums) do
+      f.levels[ml] = config.options.context or 0
+    end
+    files[#files + 1] = f
+    by_name[f.filename] = f
+  end
+  st.view = { title = source.title, files = files, files_by_name = by_name }
+
+  paint(buf, st, false)
+
   -- 'acwrite' makes `:w` fire BufWriteCmd instead of writing a file named after
   -- the buffer; the editor module turns that into per-source-file writes.
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.bo[buf].filetype = 'multibuffers'
-  pcall(vim.api.nvim_buf_set_name, buf, unique_name(model.title or 'list'))
-
-  -- Re-enable undo from a clean slate, and treat the freshly rendered view as
-  -- unmodified.
-  vim.bo[buf].undolevels = save_undolevels
+  pcall(vim.api.nvim_buf_set_name, buf, unique_name(source.title or 'list'))
   vim.bo[buf].modified = false
 
   vim.api.nvim_create_autocmd('BufWriteCmd', {
@@ -262,8 +359,31 @@ function M.open(model)
   local win = open_window(buf)
   set_keymaps(buf)
   -- Land on the first excerpt, not the blank spacer at row 0.
-  pcall(vim.api.nvim_win_set_cursor, win, { math.min(2, #lines), 0 })
+  pcall(vim.api.nvim_win_set_cursor, win, { math.min(2, vim.api.nvim_buf_line_count(buf)), 0 })
   return buf, win
+end
+
+--- Re-lay-out the view after a level change, preserving edits and the cursor's
+--- source line.
+function M.repaint(buf)
+  local st = M.state[buf]
+  if not st then
+    return
+  end
+  local win = vim.api.nvim_get_current_win()
+  local cursor_rec
+  if vim.api.nvim_win_get_buf(win) == buf then
+    cursor_rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
+  end
+
+  paint(buf, st, true)
+
+  if cursor_rec and vim.api.nvim_win_get_buf(win) == buf then
+    local target = row_for(buf, st, cursor_rec.filename, cursor_rec.lnum)
+    if target then
+      pcall(vim.api.nvim_win_set_cursor, win, { target + 1, 0 })
+    end
+  end
 end
 
 return M

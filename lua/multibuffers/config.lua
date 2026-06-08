@@ -13,10 +13,16 @@ M.defaults = {
   -- 0 = just the match line. Context lines are editable like any excerpt.
   context = 0,
 
+  -- Lines added/removed per expand/collapse keypress (a count overrides it,
+  -- e.g. `10+` adds 10 lines).
+  context_step = 4,
+
   -- Buffer-local keymaps inside the multibuffer view.
   keys = {
     jump = '<CR>', -- open the source file at the line under the cursor
     close = 'q', -- close the multibuffer view
+    expand = '+', -- show more context around the excerpt under the cursor
+    collapse = '-', -- show less context around the excerpt under the cursor
   },
 }
 
