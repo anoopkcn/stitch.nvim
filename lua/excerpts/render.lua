@@ -245,12 +245,92 @@ end
 -- write-back diffs the edited buffer against. Native edits — `gcc`, `dd`, `J`,
 -- inserts, multi-line changes — need no special handling: the diff reconciles
 -- whatever state the buffer ends up in.
-local function paint(buf, st)
-  local lines, infos = build_infos(st)
+-- Width of the inline line-number gutter ('%5d ' is 5 digits + a space).
+local GUTTER = string.rep(' ', 6)
 
+-- Place every per-row decoration for the current buffer from `rows`: rows[r+1] is
+-- the source info for buffer row r, or false for a row with no source (the row-0
+-- spacer, or a line the user inserted). Mapped rows get their line number, the
+-- record backing record_at, annotation, header/divider, and match highlight;
+-- inserted rows get a blank gutter so they stay aligned instead of shifting to
+-- column 0. This only sets extmarks — it never touches buffer text or undo — so
+-- it is safe to re-run on every structural edit.
+local function decorate(buf, st, rows)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   vim.api.nvim_buf_clear_namespace(buf, match_ns, 0, -1)
   st.marks = {}
+
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for row = 0, #lines - 1 do
+    local info = rows[row + 1]
+    if row == 0 then -- the spacer: no decoration
+    elseif not info then
+      -- Inserted line (no source yet): a blank gutter keeps it aligned.
+      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+        right_gravity = false,
+        virt_text = { { GUTTER, 'ExcerptsContextLnum' } },
+        virt_text_pos = 'inline',
+      })
+    else
+      -- Anchor extmark + inline source line number. Backs record_at (nav /
+      -- expand / highlight). Match lines get a brighter number than context.
+      local lnum_hl = info.is_match and 'ExcerptsLnum' or 'ExcerptsContextLnum'
+      local id = vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+        right_gravity = false,
+        invalidate = false,
+        virt_text = { { string.format('%5d ', info.lnum), lnum_hl } },
+        virt_text_pos = 'inline',
+      })
+      st.marks[id] = info
+
+      if info.annotation then
+        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+          right_gravity = false,
+          virt_text = { { '  ┊ ' .. info.annotation, 'ExcerptsAnnotation' } },
+          virt_text_pos = 'eol',
+        })
+      end
+
+      if info.first_in_file then
+        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+          right_gravity = false,
+          virt_lines = file_header(info.relname, info.is_first_file),
+          virt_lines_above = true,
+        })
+      elseif info.block_divider then
+        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+          right_gravity = false,
+          virt_lines = block_divider(info.gap),
+          virt_lines_above = true,
+        })
+      end
+
+      -- Highlight the matched span(s), clamped to the row's current text.
+      if info.spans then
+        local len = #(lines[row + 1] or '')
+        for _, span in ipairs(info.spans) do
+          local scol = math.max(0, math.min(span[1], len))
+          local ecol = math.max(scol, math.min(span[2], len))
+          if ecol > scol then
+            vim.api.nvim_buf_set_extmark(buf, match_ns, row, scol, {
+              end_row = row,
+              end_col = ecol,
+              hl_group = 'ExcerptsMatch',
+              priority = 200,
+            })
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Paint st.view into the buffer: a clean re-render from the source model. The
+-- buffer text is pure source; all metadata is carried by extmarks (see decorate).
+-- Records st.snapshot (painted text) and st.origin (per-row source info) as the
+-- baseline that write-back and the live row→source map diff against.
+local function paint(buf, st)
+  local lines, infos = build_infos(st)
 
   -- Disable undo across the (re)layout: anchors are placed manually and can't
   -- survive an undo, so this view op is intentionally non-undoable.
@@ -259,75 +339,79 @@ local function paint(buf, st)
   vim.bo[buf].undolevels = -1
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
-  -- Diff-on-save baseline. origin[row+1] maps a buffer row to its source line;
-  -- origin[1] (the row-0 spacer) is false (no source).
+  -- origin[row+1] is the source info for buffer row r; origin[1] (the row-0
+  -- spacer) is false. The full info is kept so decorate can re-run from it.
   st.snapshot = lines
   st.origin = { [1] = false }
-
   for _, info in ipairs(infos) do
-    local rec = {
-      filename = info.filename,
-      bufnr = info.bufnr,
-      lnum = info.lnum,
-      col = info.col,
-      source = info.source,
-    }
-    st.origin[info.row + 1] = rec
-
-    -- Anchor extmark + inline source line number. Backs record_at (nav / expand
-    -- / highlight) and tracks the row across edits. Match lines get a brighter
-    -- number than surrounding context lines.
-    local lnum_hl = info.is_match and 'ExcerptsLnum' or 'ExcerptsContextLnum'
-    local id = vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
-      right_gravity = false,
-      invalidate = false,
-      virt_text = { { string.format('%5d ', info.lnum), lnum_hl } },
-      virt_text_pos = 'inline',
-    })
-    st.marks[id] = rec
-
-    if info.annotation then
-      vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
-        right_gravity = false,
-        virt_text = { { '  ┊ ' .. info.annotation, 'ExcerptsAnnotation' } },
-        virt_text_pos = 'eol',
-      })
-    end
-
-    if info.first_in_file then
-      vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
-        right_gravity = false,
-        virt_lines = file_header(info.relname, info.is_first_file),
-        virt_lines_above = true,
-      })
-    elseif info.block_divider then
-      vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
-        right_gravity = false,
-        virt_lines = block_divider(info.gap),
-        virt_lines_above = true,
-      })
-    end
-
-    -- Highlight the matched span(s) on the line, above syntax highlighting.
-    if info.spans then
-      local len = #info.source
-      for _, span in ipairs(info.spans) do
-        local scol = math.max(0, math.min(span[1], len))
-        local ecol = math.max(scol, math.min(span[2], len))
-        if ecol > scol then
-          vim.api.nvim_buf_set_extmark(buf, match_ns, info.row, scol, {
-            end_row = info.row,
-            end_col = ecol,
-            hl_group = 'ExcerptsMatch',
-            priority = 200,
-          })
-        end
-      end
-    end
+    st.origin[info.row + 1] = info
   end
+  st.live = nil
+
+  decorate(buf, st, st.origin)
+  st.decorated_count = #lines
+  st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
 
   vim.bo[buf].undolevels = save_undolevels
   vim.bo[buf].modified = false
+end
+
+--- Map current buffer rows to their painted source info by diffing the buffer
+--- against the snapshot. Returns an array where map[r+1] is the info for buffer
+--- row r, or false for the spacer / a line the user inserted. Cached per
+--- changedtick. This is what keeps numbers + syntax correct mid-edit: an inserted
+--- line reads as an insertion, so the lines around it keep their source identity.
+function M.live_map(buf)
+  local st = M.state[buf]
+  if not st or not st.snapshot then
+    return nil
+  end
+  local tick = vim.api.nvim_buf_get_changedtick(buf)
+  if st.live and st.live.tick == tick then
+    return st.live.map
+  end
+  local current = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local map = {}
+  local hunks = vim.diff(
+    table.concat(st.snapshot, '\n') .. '\n',
+    table.concat(current, '\n') .. '\n',
+    { result_type = 'indices' }
+  )
+  local si, ci = 1, 1 -- 1-based snapshot / current positions
+  for _, h in ipairs(hunks) do
+    local sa, ca, sb, cb = h[1], h[2], h[3], h[4]
+    while ci < sb do -- identical region before the hunk; si and ci move together
+      map[ci] = st.origin[si] or false
+      si, ci = si + 1, ci + 1
+    end
+    for k = 0, cb - 1 do -- changed region: top-align new rows with the old ones
+      map[sb + k] = (k < ca and st.origin[si + k]) or false
+    end
+    -- The loop left si at the changed region's start; consume its ca old rows.
+    si, ci = si + ca, sb + cb
+  end
+  while ci <= #current do -- identical tail
+    map[ci] = st.origin[si] or false
+    si, ci = si + 1, ci + 1
+  end
+  st.live = { tick = tick, map = map }
+  return map
+end
+
+--- Re-place the gutter and decorations for the current (edited) buffer so
+--- inserted/split lines don't lose their numbers, shift, or break highlighting.
+--- Only sets extmarks — never touches buffer text or undo.
+function M.redecorate(buf)
+  local st = M.state[buf]
+  if not st or not st.snapshot then
+    return
+  end
+  local map = M.live_map(buf)
+  if map then
+    decorate(buf, st, map)
+    st.decorated_count = vim.api.nvim_buf_line_count(buf)
+    st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
+  end
 end
 
 --- Render a source model into a new excerpts view. Returns (buf, win).
@@ -380,6 +464,29 @@ function M.open(source)
     buffer = buf,
     callback = function()
       update_commentstring(buf)
+    end,
+  })
+
+  -- Keep the gutter/decorations in sync with edits. Whole-line operations
+  -- (`gcc`, `cc`, `dd`, `J`) disturb anchors and adjacent headers even without a
+  -- line-count change, so re-place on any real change in normal mode (gated by
+  -- changedtick to skip our own repaint). In insert mode the change is
+  -- per-keystroke and only a line split/join (a count change) disturbs layout, so
+  -- gate that on the line count to avoid re-decorating on every character.
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
+    buffer = buf,
+    callback = function(a)
+      local st = M.state[buf]
+      if not st then
+        return
+      end
+      if a.event == 'TextChangedI' then
+        if st.decorated_count ~= vim.api.nvim_buf_line_count(buf) then
+          M.redecorate(buf)
+        end
+      elseif st.decorated_tick ~= vim.api.nvim_buf_get_changedtick(buf) then
+        M.redecorate(buf)
+      end
     end,
   })
 

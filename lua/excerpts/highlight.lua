@@ -128,15 +128,21 @@ local function on_win(_, _, buf, top, bot)
     return false
   end
 
+  -- Resolve each row's source via the live diff map (not anchor positions), so a
+  -- line the user inserted/split doesn't drag its neighbour's highlighting onto
+  -- the wrong row. Inserted lines map to false and are left unhighlighted.
+  local map = render.live_map(buf)
+  if not map then
+    return false
+  end
+
   local line_count = vim.api.nvim_buf_line_count(buf)
   bot = math.min(bot, line_count - 1)
   local to_load
 
-  local marks = vim.api.nvim_buf_get_extmarks(buf, render.ns, { top, 0 }, { bot, -1 }, {})
-  for _, m in ipairs(marks) do
-    local id, row = m[1], m[2]
-    local rec = st.marks[id]
-    if rec then
+  for row = top, bot do
+    local rec = map[row + 1]
+    if rec and rec.filename then
       local lang = lang_for(rec.filename)
       if lang then -- grammarless files: terminal skip (no load, no highlight)
         local sbuf = rec.bufnr
