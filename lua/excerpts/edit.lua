@@ -7,14 +7,14 @@
 --   * lines you insert (no anchor extmark) are ignored
 -- A source line that changed underneath us since render is never clobbered: the
 -- excerpt is flagged inline and skipped.
-local render = require('multibuffers.render')
+local render = require('excerpts.render')
 
 local M = {}
 
 -- Inline warnings for skipped excerpts; cleared and rebuilt on every save.
-local warn_ns = vim.api.nvim_create_namespace('multibuffers_warn')
+local warn_ns = vim.api.nvim_create_namespace('excerpts_warn')
 
-vim.api.nvim_set_hl(0, 'MultibuffersDivergent', { link = 'WarningMsg', default = true })
+vim.api.nvim_set_hl(0, 'ExcerptsDivergent', { link = 'WarningMsg', default = true })
 
 -- Load (without focusing) the buffer backing `filename`. apply_text_edits needs
 -- a loaded buffer; loading an unloaded file also reads its current on-disk state
@@ -33,12 +33,12 @@ end
 
 local function flag(buf, row, message)
   vim.api.nvim_buf_set_extmark(buf, warn_ns, row, 0, {
-    virt_text = { { '  ‹ ' .. message .. ' ›', 'MultibuffersDivergent' } },
+    virt_text = { { '  ‹ ' .. message .. ' ›', 'ExcerptsDivergent' } },
     virt_text_pos = 'eol',
   })
 end
 
---- Handle `:w` on a multibuffer view.
+--- Handle `:w` on an excerpts view.
 function M.save(buf)
   local st = render.state[buf]
   if not st then
@@ -119,7 +119,7 @@ function M.save(buf)
 
   vim.bo[buf].modified = false
 
-  local msg = string.format('multibuffers: wrote %d line(s) in %d file(s)', lines_written, files_written)
+  local msg = string.format('excerpts: wrote %d line(s) in %d file(s)', lines_written, files_written)
   local level = vim.log.levels.INFO
   local notes = {}
   if diverged > 0 then

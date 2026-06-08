@@ -3,9 +3,9 @@
 -- Each match carries a per-match context level (lines shown above/below). Expand
 -- raises the level of every match in the block under the cursor; collapse lowers
 -- it (floor 0). The view is then repainted from the mutated levels.
-local config = require('multibuffers.config')
-local render = require('multibuffers.render')
-local model = require('multibuffers.model')
+local config = require('excerpts.config')
+local render = require('excerpts.render')
+local model = require('excerpts.model')
 
 local M = {}
 
@@ -24,7 +24,7 @@ local function adjust(buf, count, sign)
 
   local rec = render.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   if not rec then
-    vim.notify('multibuffers: no excerpt under the cursor', vim.log.levels.INFO)
+    vim.notify('excerpts: no excerpt under the cursor', vim.log.levels.INFO)
     return
   end
 

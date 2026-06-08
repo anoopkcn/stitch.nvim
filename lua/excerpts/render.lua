@@ -7,12 +7,12 @@
 -- Each line carries an "anchor" extmark whose id maps back to its source
 -- {filename, bufnr, lnum}. That stable line address is what write-back,
 -- jump-to-source, and expand/collapse all rely on.
-local config = require('multibuffers.config')
-local model = require('multibuffers.model')
+local config = require('excerpts.config')
+local model = require('excerpts.model')
 
 local M = {}
 
-local ns = vim.api.nvim_create_namespace('multibuffers')
+local ns = vim.api.nvim_create_namespace('excerpts')
 
 -- bufnr -> {
 --   marks = { [extmark_id] = { filename, bufnr, lnum, col, source } },
@@ -26,23 +26,23 @@ M.ns = ns
 
 -- Separate namespace for static match-span highlights (kept out of the anchor
 -- namespace so record_at/the editor never see them).
-local match_ns = vim.api.nvim_create_namespace('multibuffers_match')
+local match_ns = vim.api.nvim_create_namespace('excerpts_match')
 
 local function setup_highlights()
   local set = function(name, val)
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', val, { default = true }))
   end
-  set('MultibuffersHeader', { link = 'Directory' })
-  set('MultibuffersLnum', { link = 'LineNr' })
-  set('MultibuffersContextLnum', { link = 'NonText' })
-  set('MultibuffersAnnotation', { link = 'Comment' })
-  set('MultibuffersSeparator', { link = 'NonText' })
-  set('MultibuffersMatch', { underline = true, sp = '#61afef' })
+  set('ExcerptsHeader', { link = 'Directory' })
+  set('ExcerptsLnum', { link = 'LineNr' })
+  set('ExcerptsContextLnum', { link = 'NonText' })
+  set('ExcerptsAnnotation', { link = 'Comment' })
+  set('ExcerptsSeparator', { link = 'NonText' })
+  set('ExcerptsMatch', { underline = true, sp = '#61afef' })
 end
 setup_highlights()
 
 local function unique_name(title)
-  local base = '[Multibuffers] ' .. title
+  local base = '[Excerpts] ' .. title
   local name = base
   local n = 1
   while vim.fn.bufexists(name) == 1 do
@@ -55,9 +55,9 @@ end
 local function file_header(relname, is_first)
   local lines = {}
   if not is_first then
-    lines[#lines + 1] = { { '', 'MultibuffersSeparator' } }
+    lines[#lines + 1] = { { '', 'ExcerptsSeparator' } }
   end
-  lines[#lines + 1] = { { '▌ ' .. relname, 'MultibuffersHeader' } }
+  lines[#lines + 1] = { { '▌ ' .. relname, 'ExcerptsHeader' } }
   return lines
 end
 
@@ -65,7 +65,7 @@ end
 -- `gap` hidden source lines).
 local function block_divider(gap)
   local label = gap > 0 and string.format('   ⋮ %d lines', gap) or '   ⋮'
-  return { { { label, 'MultibuffersSeparator' } } }
+  return { { { label, 'ExcerptsSeparator' } } }
 end
 
 local function open_window(buf)
@@ -98,7 +98,7 @@ local function set_keymaps(buf)
   local opts = { buffer = buf, nowait = true, silent = true }
   if keys.jump then
     vim.keymap.set('n', keys.jump, function()
-      require('multibuffers.nav').jump(buf)
+      require('excerpts.nav').jump(buf)
     end, opts)
   end
   if keys.close then
@@ -109,13 +109,13 @@ local function set_keymaps(buf)
   if keys.expand then
     vim.keymap.set('n', keys.expand, function()
       local n = vim.v.count
-      require('multibuffers.context').expand(buf, n > 0 and n or nil)
+      require('excerpts.context').expand(buf, n > 0 and n or nil)
     end, opts)
   end
   if keys.collapse then
     vim.keymap.set('n', keys.collapse, function()
       local n = vim.v.count
-      require('multibuffers.context').collapse(buf, n > 0 and n or nil)
+      require('excerpts.context').collapse(buf, n > 0 and n or nil)
     end, opts)
   end
 end
@@ -259,7 +259,7 @@ local function paint(buf, st, preserve)
     local linetext = info.edited or info.source
     -- Anchor extmark + inline source line number. Doubles as the line address.
     -- Match lines get a brighter number than surrounding context lines.
-    local lnum_hl = info.is_match and 'MultibuffersLnum' or 'MultibuffersContextLnum'
+    local lnum_hl = info.is_match and 'ExcerptsLnum' or 'ExcerptsContextLnum'
     local id = vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
       right_gravity = false,
       invalidate = true,
@@ -278,7 +278,7 @@ local function paint(buf, st, preserve)
 
     if info.annotation then
       vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
-        virt_text = { { '  ┊ ' .. info.annotation, 'MultibuffersAnnotation' } },
+        virt_text = { { '  ┊ ' .. info.annotation, 'ExcerptsAnnotation' } },
         virt_text_pos = 'eol',
       })
     end
@@ -305,7 +305,7 @@ local function paint(buf, st, preserve)
           vim.api.nvim_buf_set_extmark(buf, match_ns, info.row, scol, {
             end_row = info.row,
             end_col = ecol,
-            hl_group = 'MultibuffersMatch',
+            hl_group = 'ExcerptsMatch',
             priority = 200,
           })
         end
@@ -318,7 +318,7 @@ local function paint(buf, st, preserve)
 
   if pending_n > kept then
     vim.notify(
-      string.format('multibuffers: %d edit(s) on now-hidden lines discarded', pending_n - kept),
+      string.format('excerpts: %d edit(s) on now-hidden lines discarded', pending_n - kept),
       vim.log.levels.WARN
     )
   end
@@ -354,7 +354,7 @@ local function update_commentstring(buf)
   end
 end
 
---- Render a source model into a new multibuffer view. Returns (buf, win).
+--- Render a source model into a new excerpts view. Returns (buf, win).
 function M.open(source)
   local buf = vim.api.nvim_create_buf(true, true)
   local st = { marks = {} }
@@ -379,14 +379,14 @@ function M.open(source)
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
-  vim.bo[buf].filetype = 'multibuffers'
+  vim.bo[buf].filetype = 'excerpts'
   pcall(vim.api.nvim_buf_set_name, buf, unique_name(source.title or 'list'))
   vim.bo[buf].modified = false
 
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     buffer = buf,
     callback = function(args)
-      require('multibuffers.edit').save(args.buf)
+      require('excerpts.edit').save(args.buf)
     end,
   })
 
@@ -398,7 +398,7 @@ function M.open(source)
     end,
   })
 
-  require('multibuffers.highlight').ensure()
+  require('excerpts.highlight').ensure()
 
   vim.api.nvim_create_autocmd('CursorMoved', {
     buffer = buf,

@@ -1,4 +1,4 @@
-# multibuffers.nvim
+# excerpts.nvim
 
 View excerpts from many files in a single buffer — Neovim's take on
 [Zed's multibuffers](https://zed.dev/docs/multibuffers).
@@ -22,8 +22,8 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-  'multibuffers.nvim',
-  opts = {}, -- calls require('multibuffers').setup()
+  'excerpts.nvim',
+  opts = {}, -- calls require('excerpts').setup()
 }
 ```
 
@@ -32,19 +32,19 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 ## Usage
 
 ```vim
-:Multibuffers grep <pattern>   " project search (ripgrep)
-:Multibuffers references       " all references to the symbol under the cursor
-:Multibuffers diagnostics      " all project diagnostics
-:Multibuffers qf               " build a view from the current quickfix list
+:Excerpts grep <pattern>   " project search (ripgrep)
+:Excerpts references       " all references to the symbol under the cursor
+:Excerpts diagnostics      " all project diagnostics
+:Excerpts qf               " build a view from the current quickfix list
 ```
 
 Or from Lua:
 
 ```lua
-require('multibuffers').grep('TODO')
-require('multibuffers').references()
-require('multibuffers').diagnostics()
-require('multibuffers').from_qflist()
+require('excerpts').grep('TODO')
+require('excerpts').references()
+require('excerpts').diagnostics()
+require('excerpts').from_qflist()
 ```
 
 Inside the view:
@@ -83,7 +83,7 @@ skipped/ignored counts. Inserting and deleting lines inside an excerpt is a
 deliberate non-goal for now — use `:cdo` for structural bulk edits.
 
 > Note: write-back goes through each source buffer and writes it, so saving the
-> multibuffer behaves like saving those files directly — it also persists any
+> excerpts buffer behaves like saving those files directly — it also persists any
 > other unsaved changes in them and triggers their `BufWritePre`/`BufWritePost`
 > autocmds. If you use format-on-save, every touched file is formatted on `:w`.
 
@@ -102,7 +102,7 @@ commands work on the same set without any extra plugin code:
 Defaults:
 
 ```lua
-require('multibuffers').setup({
+require('excerpts').setup({
   window = 'split',  -- 'split' | 'vsplit' | 'tab' | 'current'
   highlight = true,  -- project Treesitter syntax highlighting onto excerpts
   context = 0,       -- lines of source context shown above/below each match
@@ -144,19 +144,19 @@ without a Treesitter parser simply render uncoloured. Disable with
 `highlight = false`.
 
 The matched text itself is marked on top of syntax with a blue underline
-(`MultibuffersMatch`): the exact search span(s) for grep (via `rg --json`), and
+(`ExcerptsMatch`): the exact search span(s) for grep (via `rg --json`), and
 the symbol/diagnostic range for references and diagnostics.
 
 ### Highlight groups
 
 | Group                       | Default link |
 | --------------------------- | ------------ |
-| `MultibuffersHeader`        | `Directory`  |
-| `MultibuffersLnum`          | `LineNr`     |
-| `MultibuffersContextLnum`   | `NonText`    |
-| `MultibuffersMatch`         | blue underline |
-| `MultibuffersAnnotation`    | `Comment`    |
-| `MultibuffersSeparator`     | `NonText`    |
+| `ExcerptsHeader`        | `Directory`  |
+| `ExcerptsLnum`          | `LineNr`     |
+| `ExcerptsContextLnum`   | `NonText`    |
+| `ExcerptsMatch`         | blue underline |
+| `ExcerptsAnnotation`    | `Comment`    |
+| `ExcerptsSeparator`     | `NonText`    |
 
 ## Not in scope
 

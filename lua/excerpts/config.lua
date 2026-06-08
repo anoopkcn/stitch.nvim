@@ -1,8 +1,8 @@
--- User-facing configuration for multibuffers.nvim
+-- User-facing configuration for excerpts.nvim
 local M = {}
 
 M.defaults = {
-  -- Where to open the multibuffer view.
+  -- Where to open the excerpts view.
   -- 'split' | 'vsplit' | 'tab' | 'current'
   window = 'split',
 
@@ -17,10 +17,10 @@ M.defaults = {
   -- e.g. `10+` adds 10 lines).
   context_step = 4,
 
-  -- Buffer-local keymaps inside the multibuffer view.
+  -- Buffer-local keymaps inside the excerpts view.
   keys = {
     jump = '<CR>', -- open the source file at the line under the cursor
-    close = 'q', -- close the multibuffer view
+    close = 'q', -- close the excerpts view
     expand = '+', -- show more context around the excerpt under the cursor
     collapse = '-', -- show less context around the excerpt under the cursor
   },

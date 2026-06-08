@@ -1,19 +1,19 @@
 -- Cross-file syntax highlighting.
 --
 -- A single decoration provider projects each visible excerpt line's Treesitter
--- highlights from its *source* buffer onto the multibuffer as ephemeral marks.
+-- highlights from its *source* buffer onto the excerpts buffer as ephemeral marks.
 -- The language is derived from the filename, so source buffers are loaded but
 -- never filetype-detected (no LSP is started just to colour an excerpt).
 --
 -- compute_line_highlights() is a pure function (no ephemeral marks, no redraw
 -- dependency) so the capture-extraction logic can be unit-tested headlessly;
 -- the decoration-provider shell around it is deliberately thin.
-local config = require('multibuffers.config')
-local render = require('multibuffers.render')
+local config = require('excerpts.config')
+local render = require('excerpts.render')
 
 local M = {}
 
-local hl_ns = vim.api.nvim_create_namespace('multibuffers_highlight')
+local hl_ns = vim.api.nvim_create_namespace('excerpts_highlight')
 
 -- filename -> lang string, or false when the file has no Treesitter grammar.
 local lang_cache = {}

@@ -13,14 +13,14 @@ function M.run(pattern, present)
   end
 
   if vim.fn.executable('rg') == 0 then
-    vim.notify('multibuffers: ripgrep (rg) not found on PATH', vim.log.levels.ERROR)
+    vim.notify('excerpts: ripgrep (rg) not found on PATH', vim.log.levels.ERROR)
     return
   end
 
   local result = vim.system({ 'rg', '--json', '--', pattern }, { text = true }):wait()
 
   if result.code == 2 then
-    vim.notify('multibuffers: ripgrep error\n' .. (result.stderr or ''), vim.log.levels.ERROR)
+    vim.notify('excerpts: ripgrep error\n' .. (result.stderr or ''), vim.log.levels.ERROR)
     return
   end
 
@@ -51,7 +51,7 @@ function M.run(pattern, present)
   end
 
   if #items == 0 then
-    vim.notify('multibuffers: no matches for ' .. pattern, vim.log.levels.WARN)
+    vim.notify('excerpts: no matches for ' .. pattern, vim.log.levels.WARN)
     return
   end
 

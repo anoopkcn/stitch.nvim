@@ -143,7 +143,7 @@ function M.from_items(items, title)
     end
   end
 
-  return { title = title or 'Multibuffers', files = files }
+  return { title = title or 'Excerpts', files = files }
 end
 
 return M
