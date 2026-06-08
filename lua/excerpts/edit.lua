@@ -86,15 +86,26 @@ local function plan_hunk(hunk, origin, current)
 
   if ca == 0 then
     -- Pure insertion after snapshot line `sa` (sa == 0 ⇒ before the first row).
-    local ref = (sa >= 1) and origin[sa] or nil
-    if not (ref and ref.lnum) then
-      return {}, brow
-    end
     local newlines = {}
     for i = sb, sb + cb - 1 do
       newlines[#newlines + 1] = current[i]
     end
-    local l0 = ref.lnum + 1
+    local before = (sa >= 1) and origin[sa] or nil
+    local after = origin[sa + 1]
+    local ref, l0
+    if before and before.lnum then
+      if after and after.lnum and after.filename ~= before.filename then
+        -- New lines sit just above the next file's first line: prepend them to
+        -- that file (under its header), not append to the file above.
+        ref, l0 = after, after.lnum
+      else
+        ref, l0 = before, before.lnum + 1
+      end
+    elseif after and after.lnum then
+      ref, l0 = after, after.lnum -- inserting above the very first source line
+    else
+      return {}, brow
+    end
     return {
       {
         filename = ref.filename, bufnr = ref.bufnr,

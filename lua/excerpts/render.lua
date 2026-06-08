@@ -292,7 +292,14 @@ local function decorate(buf, st, rows)
       end
 
       if info.first_in_file then
-        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+        -- New lines inserted directly above this file's first line belong under
+        -- the header (they prepend to this file on save), so anchor the header
+        -- above them rather than leaving them stranded under the previous file.
+        local hrow = row
+        while hrow - 1 >= 1 and not rows[hrow] do
+          hrow = hrow - 1
+        end
+        vim.api.nvim_buf_set_extmark(buf, ns, hrow, 0, {
           right_gravity = false,
           virt_lines = file_header(info.relname, info.is_first_file),
           virt_lines_above = true,
