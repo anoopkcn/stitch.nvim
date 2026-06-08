@@ -20,6 +20,10 @@ M.state = {}
 -- lines back to their source location.
 M.ns = ns
 
+-- Separate namespace for static match-span highlights (kept out of the anchor
+-- namespace so record_at/the editor never see them).
+local match_ns = vim.api.nvim_create_namespace('multibuffers_match')
+
 local function setup_highlights()
   local set = function(name, val)
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', val, { default = true }))
@@ -29,6 +33,7 @@ local function setup_highlights()
   set('MultibuffersContextLnum', { link = 'NonText' })
   set('MultibuffersAnnotation', { link = 'Comment' })
   set('MultibuffersSeparator', { link = 'NonText' })
+  set('MultibuffersMatch', { link = 'Search' })
 end
 setup_highlights()
 
@@ -152,6 +157,7 @@ function M.open(model)
           source = line.source,
           annotation = line.annotation,
           is_match = line.is_match,
+          spans = line.spans,
           first_in_file = (bi == 1 and li == 1),
           is_first_file = (fi == 1),
           block_divider = (bi > 1 and li == 1),
@@ -203,6 +209,23 @@ function M.open(model)
         virt_lines = block_divider(info.gap),
         virt_lines_above = true,
       })
+    end
+
+    -- Highlight the matched span(s) on the line, above syntax highlighting.
+    if info.spans then
+      local len = #info.source
+      for _, span in ipairs(info.spans) do
+        local scol = math.max(0, math.min(span[1], len))
+        local ecol = math.max(scol, math.min(span[2], len))
+        if ecol > scol then
+          vim.api.nvim_buf_set_extmark(buf, match_ns, info.row, scol, {
+            end_row = info.row,
+            end_col = ecol,
+            hl_group = 'MultibuffersMatch',
+            priority = 200,
+          })
+        end
+      end
     end
   end
 

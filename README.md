@@ -126,14 +126,20 @@ not filetype-detected — no LSP is started just to colour an excerpt. Files
 without a Treesitter parser simply render uncoloured. Disable with
 `highlight = false`.
 
+The matched text itself is highlighted on top of syntax (`MultibuffersMatch`):
+the exact search span(s) for grep (via `rg --json`), and the symbol/diagnostic
+range for references and diagnostics.
+
 ### Highlight groups
 
-| Group                     | Default link |
-| ------------------------- | ------------ |
-| `MultibuffersHeader`      | `Directory`  |
-| `MultibuffersLnum`        | `LineNr`     |
-| `MultibuffersAnnotation`  | `Comment`    |
-| `MultibuffersSeparator`   | `NonText`    |
+| Group                       | Default link |
+| --------------------------- | ------------ |
+| `MultibuffersHeader`        | `Directory`  |
+| `MultibuffersLnum`          | `LineNr`     |
+| `MultibuffersContextLnum`   | `NonText`    |
+| `MultibuffersMatch`         | `Search`     |
+| `MultibuffersAnnotation`    | `Comment`    |
+| `MultibuffersSeparator`     | `NonText`    |
 
 ## Not in scope
 

@@ -86,8 +86,16 @@ function M.from_items(items, title)
           order[#order + 1] = fname
         end
         if not f.matches[lnum] then -- one excerpt per source line
-          f.matches[lnum] = { col = it.col or 1, qftext = it.text or '', type = it.type }
+          f.matches[lnum] = { col = it.col or 1, qftext = it.text or '', type = it.type, spans = {} }
           f.match_lnums[#f.match_lnums + 1] = lnum
+        end
+        -- Accumulate the highlight span for this item. Multiple items can share a
+        -- line (e.g. two matches, or two references), each contributing a span.
+        local c, e = it.col, it.end_col
+        local same_line = (not it.end_lnum) or (it.end_lnum == lnum)
+        if c and e and e > c and same_line then
+          local spans = f.matches[lnum].spans
+          spans[#spans + 1] = { c - 1, e - 1 } -- 0-based byte cols, end exclusive
         end
       end
     end
@@ -119,6 +127,7 @@ function M.from_items(items, title)
           is_match = match ~= nil,
           col = match and match.col or 1,
           annotation = annotation,
+          spans = match and #match.spans > 0 and match.spans or nil,
         }
       end
       blocks[#blocks + 1] = { lines = block_lines }
