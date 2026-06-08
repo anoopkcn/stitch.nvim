@@ -40,6 +40,12 @@ function M.diagnostics()
   require('excerpts.sources.diagnostics').run(present)
 end
 
+--- Open an excerpts view of working-tree changes (git or jj). With `revspec`,
+--- diff everything from that revision to the working copy.
+function M.diff(revspec)
+  require('excerpts.sources.diff').run(revspec, present)
+end
+
 --- Open an excerpts view from the current quickfix list.
 function M.from_qflist()
   local qf = vim.fn.getqflist({ items = 1, title = 1 })

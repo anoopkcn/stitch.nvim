@@ -38,7 +38,7 @@ line, and edit excerpt lines in place — `:w` writes every change back to its
 source file at once.
 
 Highlights:
-  • Four sources: project grep, LSP references, diagnostics, quickfix list
+  • Sources: project grep, LSP references, diagnostics, git/jj diff, quickfix
   • Quickfix-backed, so |:cdo| / |:cfdo| bulk edits work on the same set
   • Strict 1:1 editing with a source-divergence guard (never clobbers)
   • Per-excerpt source context with interactive expand/collapse
@@ -84,7 +84,7 @@ source, edit lines in place and `:w` to save them back, or `q` to close.
 4. COMMANDS                                              *excerpts-commands*
 
 All sources are reached through a single command with a subcommand: >
-    :Excerpts {grep|references|diagnostics|qf} [args]
+    :Excerpts {grep|references|diagnostics|diff|qf} [args]
 <
                                                                   *:Excerpts*
 Tab-completion completes the subcommand name in the first argument position.
@@ -130,7 +130,28 @@ excerpt shows the offending source line; the diagnostic message is shown as a
 trailing annotation (see |ExcerptsAnnotation|).
 
 ------------------------------------------------------------------------------
-4.4 :Excerpts qf                                              *:Excerpts-qf*
+4.4 :Excerpts diff                                          *:Excerpts-diff*
+
+Open a view of working-tree changes. >
+    :Excerpts diff [revspec]
+<
+Runs the version control system's diff and shows every added or modified line
+as an excerpt, grouped by file and editable like any other view (`:w` writes
+your changes back). Both git and jujutsu are supported — they emit the same
+git-format diff — and the VCS is auto-detected (a `.jj` directory means jj,
+otherwise git).
+
+With no argument it shows your current uncommitted changes (`git diff HEAD` /
+`jj diff`). With a `revspec` it shows everything changed from that revision to
+the working copy (`git diff {revspec}` / `jj diff --from {revspec}`): >
+    :Excerpts diff main      " everything on this branch vs main
+    :Excerpts diff @--        " (jj) changes since the grandparent
+<
+Note: only added and modified lines appear. The view shows current-file
+content, so a change that *only removes* lines has nothing to display.
+
+------------------------------------------------------------------------------
+4.5 :Excerpts qf                                              *:Excerpts-qf*
 
 Build a view from the current quickfix list. >
     :Excerpts qf

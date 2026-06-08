@@ -18,6 +18,8 @@ read/edit and push changes back to the buffers, and jump straight to any source 
 :Excerpts grep <pattern>   " project search (ripgrep)
 :Excerpts references       " all references to the symbol under the cursor
 :Excerpts diagnostics      " all project diagnostics
+:Excerpts diff             " working-tree changes (git or jj)
+:Excerpts diff <rev>       " everything changed since <rev>
 :Excerpts qf               " build a view from the current quickfix list
 ```
 
@@ -27,6 +29,7 @@ Or from Lua:
 require('excerpts').grep('TODO')
 require('excerpts').references()
 require('excerpts').diagnostics()
+require('excerpts').diff()         -- or .diff('main')
 require('excerpts').from_qflist()
 ```
 
