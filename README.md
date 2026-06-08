@@ -128,7 +128,10 @@ Press `+` / `-` to grow or shrink the context around the excerpt under the
 cursor (by `context_step` lines, or a count: `10+`). Expanding far enough merges
 neighbouring excerpts; collapsing splits them back. Note: because expand/collapse
 re-lays-out real anchored lines, it **resets the undo history** — any pending
-edits are kept (and still save), but you can't `u` across an expand/collapse.
+edits to existing excerpt lines are kept (and still save), but you can't `u`
+across an expand/collapse, and brand-new lines you typed into the view (which
+aren't anchored to a source line, and wouldn't be written by `:w` anyway) are
+dropped.
 
 ### Syntax highlighting
 

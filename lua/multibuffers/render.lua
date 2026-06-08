@@ -202,10 +202,14 @@ end
 -- to existing excerpt lines are carried over as buffer text while each anchor's
 -- recorded `source` stays the true original, so write-back still diffs correctly.
 local function paint(buf, st, preserve)
-  -- Capture pending edits before the old anchors are cleared.
-  local pending, pending_n = {}, 0
+  -- Capture pending edits, and carry the original divergence baseline forward,
+  -- before the old anchors are cleared. Re-snapshotting `source` from the current
+  -- file on every repaint would let an external change quietly become the new
+  -- baseline and mask divergence; existing lines keep their open-time original.
+  local pending, pending_n, old_source = {}, 0, {}
   if preserve then
     for id, rec in pairs(st.marks) do
+      old_source[rec.filename .. '\0' .. rec.lnum] = rec.source
       local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, id, {})
       if pos and pos[1] then
         local cur = vim.api.nvim_buf_get_lines(buf, pos[1], pos[1] + 1, false)[1]
@@ -259,7 +263,9 @@ local function paint(buf, st, preserve)
       bufnr = info.bufnr,
       lnum = info.lnum,
       col = info.col,
-      source = info.source, -- true original, even when buffer shows an edit
+      -- true original (open-time for existing lines, fresh for newly-revealed),
+      -- even when the buffer shows an edit
+      source = old_source[info.filename .. '\0' .. info.lnum] or info.source,
     }
 
     if info.annotation then
