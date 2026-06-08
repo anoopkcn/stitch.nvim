@@ -34,7 +34,7 @@ local function setup_highlights()
   set('MultibuffersContextLnum', { link = 'NonText' })
   set('MultibuffersAnnotation', { link = 'Comment' })
   set('MultibuffersSeparator', { link = 'NonText' })
-  set('MultibuffersMatch', { link = 'Search' })
+  set('MultibuffersMatch', { underline = true, sp = '#61afef' })
 end
 setup_highlights()
 

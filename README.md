@@ -142,9 +142,9 @@ not filetype-detected — no LSP is started just to colour an excerpt. Files
 without a Treesitter parser simply render uncoloured. Disable with
 `highlight = false`.
 
-The matched text itself is highlighted on top of syntax (`MultibuffersMatch`):
-the exact search span(s) for grep (via `rg --json`), and the symbol/diagnostic
-range for references and diagnostics.
+The matched text itself is marked on top of syntax with a blue underline
+(`MultibuffersMatch`): the exact search span(s) for grep (via `rg --json`), and
+the symbol/diagnostic range for references and diagnostics.
 
 ### Highlight groups
 
@@ -153,7 +153,7 @@ range for references and diagnostics.
 | `MultibuffersHeader`        | `Directory`  |
 | `MultibuffersLnum`          | `LineNr`     |
 | `MultibuffersContextLnum`   | `NonText`    |
-| `MultibuffersMatch`         | `Search`     |
+| `MultibuffersMatch`         | blue underline |
 | `MultibuffersAnnotation`    | `Comment`    |
 | `MultibuffersSeparator`     | `NonText`    |
 
