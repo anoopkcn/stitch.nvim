@@ -40,7 +40,18 @@ local function setup_highlights()
   local set = function(name, val)
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', val, { default = true }))
   end
-  set('ExcerptsHeader', { link = 'Directory' })
+  -- The file-header groups carry a subtle background bar. They're *resolved* from
+  -- the colorscheme (not linked) because a single link can't combine a foreground
+  -- with a separate background; the ColorScheme autocmd below re-resolves them.
+  local function attr(group, key)
+    return (vim.api.nvim_get_hl(0, { name = group, link = false }) or {})[key]
+  end
+  local hbg = attr('CursorLine', 'bg') or attr('Visual', 'bg')
+  set('ExcerptsHeaderBg', { bg = hbg }) -- the bar fill past the text
+  set('ExcerptsHeader', { fg = attr('Directory', 'fg'), bg = hbg }) -- ▌ accent
+  set('ExcerptsHeaderDir', { fg = attr('Comment', 'fg'), bg = hbg }) -- dimmed path
+  set('ExcerptsHeaderName', { fg = attr('Normal', 'fg'), bg = hbg, bold = true }) -- file name
+
   set('ExcerptsLnum', { link = 'LineNr' })
   set('ExcerptsContextLnum', { link = 'NonText' })
   set('ExcerptsAnnotation', { link = 'Comment' })
@@ -48,6 +59,32 @@ local function setup_highlights()
   set('ExcerptsMatch', { underline = true, sp = '#61afef' })
 end
 setup_highlights()
+-- :colorscheme clears user-added groups, so re-resolve the header colours after.
+vim.api.nvim_create_autocmd('ColorScheme', { callback = setup_highlights })
+
+-- Header as inline-virt-text chunks: a ▌ accent, the directory dimmed, the file
+-- name bold — so it reads as a label rather than blending into the code.
+local function header_chunks(relname)
+  local dir, base = relname:match('^(.*/)([^/]+)$')
+  if not dir then
+    dir, base = '', relname
+  end
+  local chunks = { { '▌ ', 'ExcerptsHeader' } }
+  if dir ~= '' then
+    chunks[#chunks + 1] = { dir, 'ExcerptsHeaderDir' }
+  end
+  chunks[#chunks + 1] = { base, 'ExcerptsHeaderName' }
+  return chunks
+end
+
+-- Header chunks plus a wide trailing pad so the background bar reaches the window
+-- edge. The view is `nowrap` and the headers truncate the overflow, so the pad is
+-- clipped to the window width.
+local function header_bar(relname)
+  local chunks = header_chunks(relname)
+  chunks[#chunks + 1] = { string.rep(' ', 400), 'ExcerptsHeaderBg' }
+  return chunks
+end
 
 local function unique_name(title)
   local base = '[Excerpts] ' .. title
@@ -65,7 +102,7 @@ local function file_header(relname, is_first)
   if not is_first then
     lines[#lines + 1] = { { '', 'ExcerptsSeparator' } }
   end
-  lines[#lines + 1] = { { '▌ ' .. relname, 'ExcerptsHeader' } }
+  lines[#lines + 1] = header_bar(relname)
   return lines
 end
 
@@ -78,6 +115,9 @@ end
 
 local function open_window(buf)
   local mode = config.options.window
+  -- Inherit the cursorline setting from the window we open from, rather than
+  -- forcing it on: if the user keeps cursorline off, keep it off here too.
+  local cursorline = vim.wo.cursorline
   if mode == 'current' then
     vim.api.nvim_set_current_buf(buf)
   elseif mode == 'vsplit' then
@@ -95,7 +135,7 @@ local function open_window(buf)
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = 'no'
   vim.wo[win].wrap = false
-  vim.wo[win].cursorline = true
+  vim.wo[win].cursorline = cursorline
   vim.wo[win].foldcolumn = '0'
   vim.wo[win].list = false
   return win
@@ -338,7 +378,15 @@ local function decorate(buf, st, rows)
         })
       end
 
-      if info.first_in_file then
+      if info.first_in_file and info.is_first_file then
+        -- virt_lines don't render *above* line 0, so show the first file's header
+        -- on the row-0 spacer itself rather than leaving that line blank.
+        vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+          virt_text = header_bar(info.relname),
+          virt_text_pos = 'overlay',
+          line_hl_group = 'ExcerptsHeaderBg', -- belt-and-suspenders full-width fill
+        })
+      elseif info.first_in_file then
         -- New lines inserted directly above this file's first line join this file
         -- (and prepend on save) only if they were created while editing it, so
         -- anchor the header above those. A line created while editing the file
@@ -355,6 +403,7 @@ local function decorate(buf, st, rows)
           right_gravity = false,
           virt_lines = file_header(info.relname, info.is_first_file),
           virt_lines_above = true,
+          virt_lines_overflow = 'trunc', -- clip the bar's pad to the window width
         })
       elseif info.block_divider then
         vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {

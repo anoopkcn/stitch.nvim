@@ -146,10 +146,10 @@ dropped.
 
 Each excerpt is syntax-highlighted with its **source file's** Treesitter
 grammar, so a view mixing Lua, Python and Markdown shows each line in the right
-colours. The language is derived from the filename, so source files are read but
-not filetype-detected — no LSP is started just to colour an excerpt. Files
-without a Treesitter parser simply render uncoloured. Disable with
-`highlight = false`.
+colours. Each block is parsed in its own language (the grammar is derived from
+the filename — no LSP is started just to colour an excerpt), so edits and
+newly-inserted lines are highlighted live as you type. Files whose language has
+no Treesitter parser render uncoloured. Disable with `highlight = false`.
 
 The matched text itself is marked on top of syntax with a blue underline
 (`ExcerptsMatch`): the exact search span(s) for grep (via `rg --json`), and
@@ -159,7 +159,10 @@ the symbol/diagnostic range for references and diagnostics.
 
 | Group                       | Default link |
 | --------------------------- | ------------ |
-| `ExcerptsHeader`        | `Directory`  |
+| `ExcerptsHeaderBg`      | `CursorLine` bg (the header bar) |
+| `ExcerptsHeader`        | `Directory` fg (the `▌` accent) |
+| `ExcerptsHeaderDir`     | `Comment` fg (dimmed directory) |
+| `ExcerptsHeaderName`    | bold (the file name) |
 | `ExcerptsLnum`          | `LineNr`     |
 | `ExcerptsContextLnum`   | `NonText`    |
 | `ExcerptsMatch`         | blue underline |

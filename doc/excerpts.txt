@@ -286,10 +286,11 @@ Syntax highlighting~
 
 Each excerpt is syntax-highlighted with its *source file's* Treesitter
 grammar, so a view mixing Lua, Python, and Markdown shows each line in the
-right colours. The language is derived from the filename, so source files are
-read but never filetype-detected — no LSP is started just to colour an
-excerpt. Files without a Treesitter parser render uncoloured. Disable all
-syntax projection with |excerpts-highlight| = `false`.
+right colours. Each contiguous block is parsed in its own language (the grammar
+is derived from the filename — no LSP is started just to colour an excerpt), so
+edited and newly-inserted lines are highlighted live from the buffer's own
+text. Files whose language has no Treesitter parser render uncoloured. Disable
+with |excerpts-highlight| = `false`.
 
 Match highlighting~
 
@@ -380,9 +381,25 @@ does. Set a field to a false-y value to disable that mapping: >
 All groups are defined with `default = true`, so any link you set before or
 after setup wins. Override them with |:highlight| (or `nvim_set_hl`).
 
+                                                        *ExcerptsHeaderBg*
+ExcerptsHeaderBg~
+    Background bar behind a file header. Default: the background of
+    |hl-CursorLine| (falling back to |hl-Visual|). The header groups below are
+    resolved with this background, and re-resolved on |ColorScheme|.
+
                                                           *ExcerptsHeader*
 ExcerptsHeader~
-    The `▌ {path}` file header. Default: links to |hl-Directory|.
+    The `▌` accent bar on a file header. Default: |hl-Directory| foreground.
+
+                                                       *ExcerptsHeaderDir*
+ExcerptsHeaderDir~
+    The dimmed directory part of a file header. Default: |hl-Comment|
+    foreground on the |ExcerptsHeaderBg| background.
+
+                                                      *ExcerptsHeaderName*
+ExcerptsHeaderName~
+    The bold file name in a file header. Default: |hl-Normal| foreground,
+    `bold`, on the |ExcerptsHeaderBg| background.
 
                                                             *ExcerptsLnum*
 ExcerptsLnum~
