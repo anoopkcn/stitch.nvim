@@ -16,6 +16,10 @@ local ns = vim.api.nvim_create_namespace('multibuffers')
 -- bufnr -> { marks = { [extmark_id] = {filename,bufnr,lnum,col,source} } }
 M.state = {}
 
+-- Namespace holding the anchor extmarks; the editor reads it to map edited
+-- lines back to their source location.
+M.ns = ns
+
 local function setup_highlights()
   local set = function(name, val)
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', val, { default = true }))
@@ -142,7 +146,11 @@ function M.open(model)
     end
   end
 
+  -- Populate with undo disabled so a single `u` can't wipe the whole view back
+  -- to an empty buffer; user edits after this point undo normally.
   vim.bo[buf].modifiable = true
+  local save_undolevels = vim.bo[buf].undolevels
+  vim.bo[buf].undolevels = -1
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
   for _, info in ipairs(infos) do
@@ -176,13 +184,25 @@ function M.open(model)
     end
   end
 
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].modified = false
-  vim.bo[buf].buftype = 'nofile'
+  -- 'acwrite' makes `:w` fire BufWriteCmd instead of writing a file named after
+  -- the buffer; the editor module turns that into per-source-file writes.
+  vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.bo[buf].filetype = 'multibuffers'
   pcall(vim.api.nvim_buf_set_name, buf, unique_name(model.title or 'list'))
+
+  -- Re-enable undo from a clean slate, and treat the freshly rendered view as
+  -- unmodified.
+  vim.bo[buf].undolevels = save_undolevels
+  vim.bo[buf].modified = false
+
+  vim.api.nvim_create_autocmd('BufWriteCmd', {
+    buffer = buf,
+    callback = function(args)
+      require('multibuffers.edit').save(args.buf)
+    end,
+  })
 
   vim.api.nvim_create_autocmd('BufWipeout', {
     buffer = buf,

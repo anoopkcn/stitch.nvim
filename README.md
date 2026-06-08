@@ -6,9 +6,10 @@ View excerpts from many files in a single buffer — Neovim's take on
 Populate one grouped view from a project search, LSP references, or diagnostics,
 read it top-to-bottom, and jump straight to any source line.
 
-> **Status: v0.1 — read-only viewer.** Editing excerpts and saving all files at
-> once (the "edit once, write back everywhere" core) lands in v0.2. See
-> [SCOPE.md](SCOPE.md) for the roadmap.
+> **Status: v0.2 — editable.** Edit excerpt lines in place and `:w` to write the
+> changes back to every source file at once. Strict 1:1 line editing only (see
+> [Editing](#editing)); per-excerpt context and expand/collapse land in v0.3.
+> See [SCOPE.md](SCOPE.md) for the roadmap.
 
 ## Requirements
 
@@ -52,9 +53,34 @@ Inside the view:
 | ------- | ---------------------------------------- |
 | `<CR>`  | open the source file at the line/cursor  |
 | `q`     | close the view                           |
+| `:w`    | write all edits back to their source files |
 
 Each excerpt shows its source line number inline; files are separated by a
 header. Diagnostics show their message as a trailing annotation.
+
+## Editing
+
+Edit excerpt lines as if they were an ordinary buffer, then `:w` — every changed
+line is written back to its source file, and all touched files are saved
+together.
+
+v0.2 is **strict 1:1 line editing**:
+
+- Editing the text of an existing excerpt line is written back.
+- Lines you *insert* (which have no source location) are ignored.
+- Excerpts you *delete* are ignored (the source line is left as-is).
+- If a source line changed underneath you since the view was opened, that
+  excerpt is flagged inline (`‹ source changed — not written ›`) and **skipped**,
+  never clobbered.
+
+After `:w` you get a summary, e.g. `wrote 3 line(s) in 2 file(s)`, plus any
+skipped/ignored counts. Inserting and deleting lines inside an excerpt is a
+deliberate non-goal for now — use `:cdo` for structural bulk edits.
+
+> Note: write-back goes through each source buffer and writes it, so saving the
+> multibuffer behaves like saving those files directly — it also persists any
+> other unsaved changes in them and triggers their `BufWritePre`/`BufWritePost`
+> autocmds. If you use format-on-save, every touched file is formatted on `:w`.
 
 ### Bulk edits
 
