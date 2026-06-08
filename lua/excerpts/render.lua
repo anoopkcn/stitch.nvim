@@ -28,6 +28,14 @@ M.ns = ns
 -- namespace so record_at/the editor never see them).
 local match_ns = vim.api.nvim_create_namespace('excerpts_match')
 
+-- Records, per inserted line, the file the user was editing when they created it
+-- (`st.cursor_file` at insert time). A line inserted exactly at a file boundary is
+-- otherwise ambiguous — `o` below file A's last line and `O` above file B's first
+-- line produce the same buffer — so this intent decides which file it joins, for
+-- both the header layout and write-back. Survives later edits (it's a tracking
+-- extmark) and is cleared on (re)paint, which establishes a fresh baseline.
+local intent_ns = vim.api.nvim_create_namespace('excerpts_intent')
+
 local function setup_highlights()
   local set = function(name, val)
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', val, { default = true }))
@@ -150,7 +158,29 @@ local function update_commentstring(buf)
   local rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   if rec then
     vim.bo[buf].commentstring = commentstring_for(rec.filename)
+    -- Remember the file under the cursor so a line inserted next is attributed
+    -- to it. Only updates on real excerpt lines, so it survives the cursor
+    -- landing on a freshly-inserted (unanchored) line.
+    local st = M.state[buf]
+    if st then
+      st.cursor_file = rec.filename
+    end
   end
+end
+
+--- The file an inserted line was tagged with (the file being edited when it was
+--- created), or nil. `row` is 0-based.
+function M.intent_at(buf, row)
+  local st = M.state[buf]
+  if not st or not st.intent then
+    return nil
+  end
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, intent_ns, { row, 0 }, { row, -1 }, {})) do
+    if st.intent[m[1]] then
+      return st.intent[m[1]]
+    end
+  end
+  return nil
 end
 
 --- Look up the source record for a buffer row (0-indexed).
@@ -248,6 +278,20 @@ end
 -- Width of the inline line-number gutter ('%5d ' is 5 digits + a space).
 local GUTTER = string.rep(' ', 6)
 
+-- Intent of an inserted line (0-based row): the file it joins. Reads the row's
+-- intent mark, creating one tagged with the file currently being edited if the
+-- line is newly inserted. Returns the filename (or nil if unknown).
+local function row_intent(buf, st, row)
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, intent_ns, { row, 0 }, { row, -1 }, {})) do
+    if st.intent[m[1]] ~= nil then
+      return st.intent[m[1]]
+    end
+  end
+  local id = vim.api.nvim_buf_set_extmark(buf, intent_ns, row, 0, { right_gravity = false })
+  st.intent[id] = st.cursor_file or false
+  return st.cursor_file
+end
+
 -- Place every per-row decoration for the current buffer from `rows`: rows[r+1] is
 -- the source info for buffer row r, or false for a row with no source (the row-0
 -- spacer, or a line the user inserted). Mapped rows get their line number, the
@@ -265,7 +309,10 @@ local function decorate(buf, st, rows)
     local info = rows[row + 1]
     if row == 0 then -- the spacer: no decoration
     elseif not info then
-      -- Inserted line (no source yet): a blank gutter keeps it aligned.
+      -- Inserted line (no source yet): tag it with the file being edited (so a
+      -- boundary insert knows which file it joins) and give it a blank gutter so
+      -- it stays aligned instead of shifting to column 0.
+      row_intent(buf, st, row)
       vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
         right_gravity = false,
         virt_text = { { GUTTER, 'ExcerptsContextLnum' } },
@@ -292,11 +339,16 @@ local function decorate(buf, st, rows)
       end
 
       if info.first_in_file then
-        -- New lines inserted directly above this file's first line belong under
-        -- the header (they prepend to this file on save), so anchor the header
-        -- above them rather than leaving them stranded under the previous file.
+        -- New lines inserted directly above this file's first line join this file
+        -- (and prepend on save) only if they were created while editing it, so
+        -- anchor the header above those. A line created while editing the file
+        -- above stays under that file (header stays put).
         local hrow = row
         while hrow - 1 >= 1 and not rows[hrow] do
+          local intent = row_intent(buf, st, hrow - 1)
+          if intent and intent ~= info.filename then
+            break
+          end
           hrow = hrow - 1
         end
         vim.api.nvim_buf_set_extmark(buf, ns, hrow, 0, {
@@ -354,6 +406,10 @@ local function paint(buf, st)
     st.origin[info.row + 1] = info
   end
   st.live = nil
+  -- Fresh baseline: every line now maps to source, so there are no pending
+  -- insertions to attribute.
+  vim.api.nvim_buf_clear_namespace(buf, intent_ns, 0, -1)
+  st.intent = {}
 
   decorate(buf, st, st.origin)
   st.decorated_count = #lines

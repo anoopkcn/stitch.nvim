@@ -80,7 +80,7 @@ end
 --
 -- Each plan replaces source lines [l0, l1] (1-based) of `filename` with
 -- `newlines`; l1 == l0 - 1 means a pure insertion before l0.
-local function plan_hunk(hunk, origin, current)
+local function plan_hunk(hunk, origin, current, buf)
   local sa, ca, sb, cb = hunk[1], hunk[2], hunk[3], hunk[4]
   local brow = math.max(0, sb - 1)
 
@@ -95,9 +95,14 @@ local function plan_hunk(hunk, origin, current)
     local ref, l0
     if before and before.lnum then
       if after and after.lnum and after.filename ~= before.filename then
-        -- New lines sit just above the next file's first line: prepend them to
-        -- that file (under its header), not append to the file above.
-        ref, l0 = after, after.lnum
+        -- File boundary: join the file the line was created in (intent), else
+        -- default to the following file. (`o` below the file above and `O` above
+        -- the file below produce the same buffer; intent is the only signal.)
+        if render.intent_at(buf, sb - 1) == before.filename then
+          ref, l0 = before, before.lnum + 1 -- append to the file above
+        else
+          ref, l0 = after, after.lnum -- prepend to the file below
+        end
       else
         ref, l0 = before, before.lnum + 1
       end
@@ -195,7 +200,7 @@ function M.save(buf)
   -- Group mappable hunks by source file; flag the rest.
   local by_file, order, unmappable = {}, {}, 0
   for _, h in ipairs(hunks) do
-    local plans, brow = plan_hunk(h, st.origin, current)
+    local plans, brow = plan_hunk(h, st.origin, current, buf)
     if #plans == 0 then
       unmappable = unmappable + 1
       flag(buf, brow, 'cannot map edit (spans files/blocks) — not written')
