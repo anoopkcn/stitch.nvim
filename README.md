@@ -72,7 +72,6 @@ require('excerpts').setup({
 | Group                       | Default link |
 | --------------------------- | ------------ |
 | `ExcerptsHeaderBg`      | `CursorLine` bg (the header bar) |
-| `ExcerptsHeader`        | `Directory` fg (the `▌` accent) |
 | `ExcerptsHeaderDir`     | `Comment` fg (dimmed directory) |
 | `ExcerptsHeaderName`    | bold (the file name) |
 | `ExcerptsLnum`          | `LineNr`     |

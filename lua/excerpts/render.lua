@@ -48,7 +48,6 @@ local function setup_highlights()
   end
   local hbg = attr('CursorLine', 'bg') or attr('Visual', 'bg')
   set('ExcerptsHeaderBg', { bg = hbg }) -- the bar fill past the text
-  set('ExcerptsHeader', { fg = attr('Directory', 'fg'), bg = hbg }) -- ▌ accent
   set('ExcerptsHeaderDir', { fg = attr('Comment', 'fg'), bg = hbg }) -- dimmed path
   set('ExcerptsHeaderName', { fg = attr('Normal', 'fg'), bg = hbg, bold = true }) -- file name
 
@@ -62,14 +61,14 @@ setup_highlights()
 -- :colorscheme clears user-added groups, so re-resolve the header colours after.
 vim.api.nvim_create_autocmd('ColorScheme', { callback = setup_highlights })
 
--- Header as inline-virt-text chunks: a ▌ accent, the directory dimmed, the file
--- name bold — so it reads as a label rather than blending into the code.
+-- Header as inline-virt-text chunks on the background bar: the directory dimmed
+-- and the file name bold, so it reads as a label rather than blending into code.
 local function header_chunks(relname)
   local dir, base = relname:match('^(.*/)([^/]+)$')
   if not dir then
     dir, base = '', relname
   end
-  local chunks = { { '▌ ', 'ExcerptsHeader' } }
+  local chunks = { { ' ', 'ExcerptsHeaderDir' } } -- small left margin on the bar
   if dir ~= '' then
     chunks[#chunks + 1] = { dir, 'ExcerptsHeaderDir' }
   end

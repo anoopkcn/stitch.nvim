@@ -168,7 +168,7 @@ The view is a dedicated, editable scratch buffer (filetype `excerpts`,
 buftype `acwrite`). It is opened where |excerpts-window| says.
 
 Layout:
-  • Excerpts are grouped by file under a `▌ {relative path}` header.
+  • Excerpts are grouped by file under a `{relative path}` header bar.
   • Each line shows its source line number inline on the left.
   • Match lines carry a brighter line number than surrounding context lines.
   • The matched span(s) are underlined on top of syntax highlighting.
@@ -408,10 +408,6 @@ ExcerptsHeaderBg~
     Background bar behind a file header. Default: the background of
     |hl-CursorLine| (falling back to |hl-Visual|). The header groups below are
     resolved with this background, and re-resolved on |ColorScheme|.
-
-                                                          *ExcerptsHeader*
-ExcerptsHeader~
-    The `▌` accent bar on a file header. Default: |hl-Directory| foreground.
 
                                                        *ExcerptsHeaderDir*
 ExcerptsHeaderDir~
