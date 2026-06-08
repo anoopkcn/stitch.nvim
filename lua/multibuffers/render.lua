@@ -118,7 +118,10 @@ function M.open(model)
   M.state[buf] = st
 
   -- Flatten the model into buffer lines, remembering each row's source.
-  local lines = {}
+  -- A leading blank line is required: Neovim does not render virt_lines placed
+  -- *above* buffer line 0, so the first file header would be invisible. Reserving
+  -- row 0 puts every header on a content row >= 1, where virt_lines_above renders.
+  local lines = { '' }
   local infos = {}
   for fi, f in ipairs(model.files) do
     for ii, item in ipairs(f.items) do
@@ -191,7 +194,8 @@ function M.open(model)
 
   local win = open_window(buf)
   set_keymaps(buf)
-  pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
+  -- Land on the first excerpt, not the blank spacer at row 0.
+  pcall(vim.api.nvim_win_set_cursor, win, { math.min(2, #lines), 0 })
   return buf, win
 end
 
