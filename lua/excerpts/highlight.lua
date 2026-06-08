@@ -1,13 +1,17 @@
--- Cross-file syntax highlighting.
+-- Cross-file syntax highlighting via real Treesitter parsing of the excerpts
+-- buffer itself.
 --
--- A single decoration provider projects each visible excerpt line's Treesitter
--- highlights from its *source* buffer onto the excerpts buffer as ephemeral marks.
--- The language is derived from the filename, so source buffers are loaded but
--- never filetype-detected (no LSP is started just to colour an excerpt).
+-- Each maximal run of consecutive same-language rows (split at file headers and
+-- `⋮` block dividers) is an "included region" of a per-language parser, so the
+-- buffer is parsed as if each block were a slice of its own file. A decoration
+-- provider projects those parsers' captures onto the visible rows as ephemeral
+-- marks. This highlights existing, edited, newly-inserted, and multi-line content
+-- uniformly from the buffer's *actual* text — no projection from source buffers,
+-- no standalone single-line parsing.
 --
--- compute_line_highlights() is a pure function (no ephemeral marks, no redraw
--- dependency) so the capture-extraction logic can be unit-tested headlessly;
--- the decoration-provider shell around it is deliberately thin.
+-- The parsers track buffer edits themselves (incremental re-parse on `parse()`),
+-- so in-place edits need no work here; only a structural change (line count
+-- changed, or a repaint) shifts the block ranges and re-applies the regions.
 local config = require('excerpts.config')
 local render = require('excerpts.render')
 
@@ -20,6 +24,9 @@ local lang_cache = {}
 
 --- Resolve the Treesitter language for a file from its name (pure, cached).
 local function lang_for(filename)
+  if not filename then
+    return nil
+  end
   local cached = lang_cache[filename]
   if cached ~= nil then
     return cached or nil
@@ -36,87 +43,59 @@ local function lang_for(filename)
   return lang or nil
 end
 
---- Compute Treesitter highlight spans for one source line. Pure: returns a list
---- of { col, end_col, hl_group, priority } (0-based byte columns, end-exclusive)
---- and sets no extmarks. Columns are clamped to `max_col` (the display line's
---- byte length) so an edited excerpt can't push a span past the rendered text.
---- @param source_buf integer loaded source buffer
---- @param lnum0 integer 0-based source line
---- @param lang string|nil nil => no spans (grammarless file)
---- @param max_col integer
---- @return table[]
-function M.compute_line_highlights(source_buf, lnum0, lang, max_col)
-  local spans = {}
-  if not lang or not vim.api.nvim_buf_is_loaded(source_buf) then
-    return spans
+-- Language of buffer row `row` (0-based) and whether it begins a new block.
+-- Existing rows take the language of their source file; an inserted line takes
+-- the language of the file it is joining (its insert intent).
+local function row_lang(buf, map, row)
+  local info = map[row + 1]
+  if info and info.filename then
+    return lang_for(info.filename), (info.first_in_file or info.block_divider) == true
   end
-  if lnum0 < 0 or lnum0 >= vim.api.nvim_buf_line_count(source_buf) then
-    return spans
-  end
-  local ok, parser = pcall(vim.treesitter.get_parser, source_buf, lang, { error = false })
-  if not ok or not parser then
-    return spans
-  end
-  pcall(function()
-    parser:parse({ lnum0, lnum0 + 1 })
-  end)
-  parser:for_each_tree(function(tstree, tree)
-    local tlang = tree:lang()
-    local query = vim.treesitter.query.get(tlang, 'highlights')
-    if not query then
-      return
-    end
-    for id, node, metadata in query:iter_captures(tstree:root(), source_buf, lnum0, lnum0 + 1) do
-      local name = query.captures[id]
-      if name:sub(1, 1) ~= '_' then -- conventionally-hidden captures
-        local sr, sc, er, ec = node:range()
-        if sr <= lnum0 and er >= lnum0 then
-          -- Clamp a multi-line node to this line's portion.
-          local start_col = (sr == lnum0) and sc or 0
-          local end_col = (er == lnum0) and ec or max_col
-          start_col = math.min(start_col, max_col)
-          end_col = math.min(end_col, max_col)
-          if end_col > start_col then
-            spans[#spans + 1] = {
-              col = start_col,
-              end_col = end_col,
-              hl_group = '@' .. name .. '.' .. tlang,
-              priority = tonumber(metadata.priority) or 100,
-            }
-          end
-        end
-      end
-    end
-  end)
-  return spans
+  return lang_for(render.intent_at(buf, row)), false
 end
 
--- Source files awaiting a (scheduled, off-redraw) load.
-local pending = {}
-
-local function schedule_load(mbbuf, recs)
-  local fresh = {}
-  for _, rec in ipairs(recs) do
-    if not pending[rec.filename] then
-      pending[rec.filename] = true
-      fresh[#fresh + 1] = rec
-    end
-  end
-  if #fresh == 0 then
+-- Recompute each language's included regions (one region per contiguous
+-- same-language block) from the live row→source map and apply them to
+-- per-language parsers (created on demand, cached in st.ts_parsers).
+local function update_regions(buf, st)
+  local map = render.live_map(buf)
+  if not map then
     return
   end
-  vim.schedule(function()
-    for _, rec in ipairs(fresh) do
-      pending[rec.filename] = nil
-      local b = (rec.bufnr and vim.api.nvim_buf_is_valid(rec.bufnr)) and rec.bufnr
-        or vim.fn.bufadd(rec.filename)
-      if not vim.api.nvim_buf_is_loaded(b) then
-        pcall(vim.fn.bufload, b)
-      end
-      rec.bufnr = b -- cache the resolved handle for next redraw
+  local line_count = vim.api.nvim_buf_line_count(buf)
+
+  local by_lang = {}
+  local cur_lang, cur_start
+  local function flush(end_row)
+    if cur_lang and cur_start then
+      local regions = by_lang[cur_lang] or {}
+      regions[#regions + 1] = { { cur_start, 0, end_row + 1, 0 } } -- one region, one range
+      by_lang[cur_lang] = regions
     end
-    pcall(vim.api.nvim__redraw, { buf = mbbuf, valid = false })
-  end)
+    cur_lang, cur_start = nil, nil
+  end
+  for row = 1, line_count - 1 do -- row 0 is the spacer
+    local lang, boundary = row_lang(buf, map, row)
+    if lang ~= cur_lang or boundary then
+      flush(row - 1)
+      cur_lang, cur_start = lang, row
+    end
+  end
+  flush(line_count - 1)
+
+  st.ts_parsers = st.ts_parsers or {}
+  for lang in pairs(by_lang) do
+    if st.ts_parsers[lang] == nil then
+      local ok, p = pcall(vim.treesitter.get_parser, buf, lang, { error = false })
+      st.ts_parsers[lang] = (ok and p) or false
+    end
+  end
+  -- Apply regions to every known parser (empty for languages not currently shown).
+  for lang, parser in pairs(st.ts_parsers) do
+    if parser then
+      pcall(parser.set_included_regions, parser, by_lang[lang] or {})
+    end
+  end
 end
 
 local function on_win(_, _, buf, top, bot)
@@ -128,46 +107,42 @@ local function on_win(_, _, buf, top, bot)
     return false
   end
 
-  -- Resolve each row's source via the live diff map (not anchor positions), so a
-  -- line the user inserted/split doesn't drag its neighbour's highlighting onto
-  -- the wrong row. Inserted lines map to false and are left unhighlighted.
-  local map = render.live_map(buf)
-  if not map then
-    return false
+  local line_count = vim.api.nvim_buf_line_count(buf)
+  -- Block ranges only shift on a structural change; in-place edits keep them, and
+  -- the parsers re-parse those incrementally on parse() below.
+  if st.ts_regions_count ~= line_count then
+    update_regions(buf, st)
+    st.ts_regions_count = line_count
+  end
+  if not st.ts_parsers then
+    return true
   end
 
-  local line_count = vim.api.nvim_buf_line_count(buf)
   bot = math.min(bot, line_count - 1)
-  local to_load
-
-  for row = top, bot do
-    local rec = map[row + 1]
-    if rec and rec.filename then
-      local lang = lang_for(rec.filename)
-      if lang then -- grammarless files: terminal skip (no load, no highlight)
-        local sbuf = rec.bufnr
-        if sbuf and vim.api.nvim_buf_is_valid(sbuf) and vim.api.nvim_buf_is_loaded(sbuf) then
-          local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''
-          local spans = M.compute_line_highlights(sbuf, rec.lnum - 1, lang, #line)
-          for _, s in ipairs(spans) do
-            pcall(vim.api.nvim_buf_set_extmark, buf, hl_ns, row, s.col, {
-              end_row = row,
-              end_col = s.end_col,
-              hl_group = s.hl_group,
-              priority = s.priority,
+  for _, parser in pairs(st.ts_parsers) do
+    if parser then
+      pcall(parser.parse, parser, { top, bot + 1 })
+      parser:for_each_tree(function(tstree, ltree)
+        local lang = ltree:lang()
+        local query = vim.treesitter.query.get(lang, 'highlights')
+        if not query then
+          return
+        end
+        for id, node, metadata in query:iter_captures(tstree:root(), buf, top, bot + 1) do
+          local name = query.captures[id]
+          if name:sub(1, 1) ~= '_' then -- conventionally-hidden captures
+            local sr, sc, er, ec = node:range()
+            pcall(vim.api.nvim_buf_set_extmark, buf, hl_ns, sr, sc, {
+              end_row = er,
+              end_col = ec,
+              hl_group = '@' .. name .. '.' .. lang,
+              priority = tonumber(metadata.priority) or 100,
               ephemeral = true,
             })
           end
-        else
-          to_load = to_load or {}
-          to_load[#to_load + 1] = rec
         end
-      end
+      end)
     end
-  end
-
-  if to_load then
-    schedule_load(buf, to_load)
   end
   return true
 end

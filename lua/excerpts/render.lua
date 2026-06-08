@@ -410,6 +410,9 @@ local function paint(buf, st)
   -- insertions to attribute.
   vim.api.nvim_buf_clear_namespace(buf, intent_ns, 0, -1)
   st.intent = {}
+  -- The layout changed wholesale; have the highlighter recompute its block
+  -- regions on the next redraw.
+  st.ts_regions_count = nil
 
   decorate(buf, st, st.origin)
   st.decorated_count = #lines
