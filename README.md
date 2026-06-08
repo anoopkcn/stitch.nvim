@@ -64,23 +64,31 @@ header. Diagnostics show their message as a trailing annotation.
 
 ## Editing
 
-Edit excerpt lines as if they were an ordinary buffer, then `:w` — every changed
-line is written back to its source file, and all touched files are saved
-together. `commentstring` tracks the source file under the cursor, so `gcc` (and
-comment plugins) comment each excerpt in its own language.
+Edit the buffer with any native command — change text, `dd` a line, `J`, paste,
+split one line into several, `gcc` to comment — then `:w`. Changes are written
+back to the correct source files and all touched files are saved together. There
+are no special key mappings: on save the buffer is diffed against what was
+painted, and each change is mapped back to its source range, so **deletion,
+insertion, and multi-line edits all work**.
 
-v0.2 is **strict 1:1 line editing**:
+`gc`/`gcc` comment in each excerpt's own language — `commentstring` tracks the
+source file under the cursor (Lua with `--`, Python with `#`, …). A single-file
+or single-line comment is exact; a multi-line `gc` spanning *different* languages
+uses the cursor line's syntax (Neovim's built-in commenting applies one
+`commentstring` per invocation).
 
-- Editing the text of an existing excerpt line is written back.
-- Lines you *insert* (which have no source location) are ignored.
-- Excerpts you *delete* are ignored (the source line is left as-is).
-- If a source line changed underneath you since the view was opened, that
-  excerpt is flagged inline (`‹ source changed — not written ›`) and **skipped**,
-  never clobbered.
+Guarantees:
 
-After `:w` you get a summary, e.g. `wrote 3 line(s) in 2 file(s)`, plus any
-skipped/ignored counts. Inserting and deleting lines inside an excerpt is a
-deliberate non-goal for now — use `:cdo` for structural bulk edits.
+- If a source line changed underneath you since the view was opened, that edit
+  is flagged inline (`‹ source changed — not written ›`) and **skipped**, never
+  clobbered.
+- A change that can't be mapped to a single source range — it spans two files,
+  or a structural edit straddles a block boundary — is likewise flagged and
+  skipped rather than guessed at.
+
+After `:w` you get a summary, e.g. `wrote 3 edit(s) in 2 file(s)`, plus any
+skipped counts. Expand/collapse re-lays-out the view, so write (`:w`) any pending
+edits before using `+`/`-`.
 
 > Note: write-back goes through each source buffer and writes it, so saving the
 > excerpts buffer behaves like saving those files directly — it also persists any

@@ -93,6 +93,58 @@ function M.materialize(file_src, levels)
   return blocks
 end
 
+--- Re-base a file's match line numbers after write-back changed its source.
+--- Each edit is { l0, oldcount, newcount }: source lines [l0, l0+oldcount-1]
+--- (1-based) were replaced by `newcount` lines (oldcount=0 ⇒ pure insertion at
+--- l0). Matches on deleted lines are dropped; matches below an edit shift by the
+--- net line delta. Keeps match_lnums, matches, line_count, and (if present)
+--- levels consistent so a repaint from the now-saved source is correct.
+--- @param file table view file (match_lnums, matches, levels?, line_count)
+--- @param edits table[]
+function M.shift_file(file, edits)
+  table.sort(edits, function(a, b)
+    return a.l0 < b.l0
+  end)
+  local function shift(lnum)
+    local out = lnum
+    for _, e in ipairs(edits) do
+      local last = e.l0 + e.oldcount - 1
+      if e.oldcount > 0 and lnum >= e.l0 and lnum <= last then
+        if e.newcount == 0 then
+          return nil -- the match's own line was deleted
+        end
+        return out - (lnum - e.l0) -- snap to the edited region's new start
+      elseif lnum > last then
+        out = out + (e.newcount - e.oldcount)
+      end
+    end
+    return out
+  end
+
+  local nl_list, nmatches = {}, {}
+  local nlevels = file.levels and {} or nil
+  for _, ml in ipairs(file.match_lnums) do
+    local nl = shift(ml)
+    if nl then
+      nl_list[#nl_list + 1] = nl
+      nmatches[nl] = file.matches[ml]
+      if nlevels then
+        nlevels[nl] = file.levels[ml]
+      end
+    end
+  end
+  file.match_lnums = nl_list
+  file.matches = nmatches
+  if nlevels then
+    file.levels = nlevels
+  end
+  local total = 0
+  for _, e in ipairs(edits) do
+    total = total + (e.newcount - e.oldcount)
+  end
+  file.line_count = math.max(0, file.line_count + total)
+end
+
 --- Build a per-file source model from quickfix-style items.
 --- @param items table[] quickfix items ({ filename|bufnr, lnum, col, end_col, text })
 --- @param title string|nil

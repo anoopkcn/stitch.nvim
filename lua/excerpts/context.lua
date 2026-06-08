@@ -22,6 +22,13 @@ local function adjust(buf, count, sign)
     return
   end
 
+  -- Expand/collapse re-lays-out the buffer, which can't preserve structural
+  -- (multi-line / insert / delete) edits. Require a clean buffer first.
+  if vim.bo[buf].modified then
+    vim.notify('excerpts: write (:w) before expand/collapse', vim.log.levels.WARN)
+    return
+  end
+
   local rec = render.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   if not rec then
     vim.notify('excerpts: no excerpt under the cursor', vim.log.levels.INFO)

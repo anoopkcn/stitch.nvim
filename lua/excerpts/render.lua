@@ -120,6 +120,39 @@ local function set_keymaps(buf)
   end
 end
 
+-- 'commentstring' for a file, derived from its name and cached per filetype.
+local cs_cache = {}
+local function commentstring_for(filename)
+  local ft = vim.filetype.match({ filename = filename })
+  if not ft or ft == '' then
+    return ''
+  end
+  local cs = cs_cache[ft]
+  if cs == nil then
+    local ok, val = pcall(vim.filetype.get_option, ft, 'commentstring')
+    cs = (ok and val) or ''
+    cs_cache[ft] = cs
+  end
+  return cs
+end
+
+-- Native `gc`/`gcc` reads 'commentstring' to choose the comment syntax — pure
+-- source text doesn't tell it the language. Keep it matching the source file
+-- under the cursor so commenting uses each excerpt's own syntax. (Single-line
+-- and single-file selections are correct; a mixed-language multi-line selection
+-- uses the cursor line's syntax — native commenting has one commentstring per
+-- invocation.)
+local function update_commentstring(buf)
+  local win = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_buf(win) ~= buf then
+    return
+  end
+  local rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
+  if rec then
+    vim.bo[buf].commentstring = commentstring_for(rec.filename)
+  end
+end
+
 --- Look up the source record for a buffer row (0-indexed).
 function M.record_at(buf, row)
   local st = M.state[buf]
@@ -142,11 +175,6 @@ function M.close(buf)
   else
     pcall(vim.api.nvim_buf_delete, buf, { force = true })
   end
-end
-
--- Stable map key for a (filename, lnum) pair.
-local function key(filename, lnum)
-  return filename .. '\0' .. lnum
 end
 
 -- Flatten the live view (each file materialized for its current levels) into
@@ -206,43 +234,19 @@ local function row_for(buf, st, filename, lnum)
   return nearest
 end
 
--- Paint st.view into the buffer. With preserve=true (a repaint), pending edits
--- to existing excerpt lines are carried over as buffer text while each anchor's
--- recorded `source` stays the true original, so write-back still diffs correctly.
-local function paint(buf, st, preserve)
-  -- Capture pending edits, and carry the original divergence baseline forward,
-  -- before the old anchors are cleared. Re-snapshotting `source` from the current
-  -- file on every repaint would let an external change quietly become the new
-  -- baseline and mask divergence; existing lines keep their open-time original.
-  local pending, pending_n, old_source = {}, 0, {}
-  if preserve then
-    for id, rec in pairs(st.marks) do
-      old_source[key(rec.filename, rec.lnum)] = rec.source
-      local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, id, {})
-      if pos and pos[1] then
-        local cur = vim.api.nvim_buf_get_lines(buf, pos[1], pos[1] + 1, false)[1]
-        if cur ~= nil and cur ~= rec.source then
-          pending[key(rec.filename, rec.lnum)] = cur
-          pending_n = pending_n + 1
-        end
-      end
-    end
-  end
-
+-- Paint st.view into the buffer: a clean re-render from the source model. The
+-- buffer text is pure source; all metadata (line numbers, headers, dividers,
+-- annotations, match highlights) is carried by extmarks. Anchors use
+-- invalidate=false / right_gravity=false so they survive whole-line edits (e.g.
+-- `gcc`); virt_lines use right_gravity=false so headers don't drift downward.
+--
+-- Records st.snapshot (the painted source text) and st.origin (the source
+-- {filename,bufnr,lnum,col,source} of every buffer row) as the baseline that
+-- write-back diffs the edited buffer against. Native edits — `gcc`, `dd`, `J`,
+-- inserts, multi-line changes — need no special handling: the diff reconciles
+-- whatever state the buffer ends up in.
+local function paint(buf, st)
   local lines, infos = build_infos(st)
-
-  -- Overlay surviving edits onto the new line list.
-  local kept = 0
-  if pending_n > 0 then
-    for _, info in ipairs(infos) do
-      local edited = pending[key(info.filename, info.lnum)]
-      if edited ~= nil then
-        lines[info.row + 1] = edited
-        info.edited = edited
-        kept = kept + 1
-      end
-    end
-  end
 
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   vim.api.nvim_buf_clear_namespace(buf, match_ns, 0, -1)
@@ -255,29 +259,36 @@ local function paint(buf, st, preserve)
   vim.bo[buf].undolevels = -1
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
+  -- Diff-on-save baseline. origin[row+1] maps a buffer row to its source line;
+  -- origin[1] (the row-0 spacer) is false (no source).
+  st.snapshot = lines
+  st.origin = { [1] = false }
+
   for _, info in ipairs(infos) do
-    local linetext = info.edited or info.source
-    -- Anchor extmark + inline source line number. Doubles as the line address.
-    -- Match lines get a brighter number than surrounding context lines.
-    local lnum_hl = info.is_match and 'ExcerptsLnum' or 'ExcerptsContextLnum'
-    local id = vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
-      right_gravity = false,
-      invalidate = true,
-      virt_text = { { string.format('%5d ', info.lnum), lnum_hl } },
-      virt_text_pos = 'inline',
-    })
-    st.marks[id] = {
+    local rec = {
       filename = info.filename,
       bufnr = info.bufnr,
       lnum = info.lnum,
       col = info.col,
-      -- true original (open-time for existing lines, fresh for newly-revealed),
-      -- even when the buffer shows an edit
-      source = old_source[key(info.filename, info.lnum)] or info.source,
+      source = info.source,
     }
+    st.origin[info.row + 1] = rec
+
+    -- Anchor extmark + inline source line number. Backs record_at (nav / expand
+    -- / highlight) and tracks the row across edits. Match lines get a brighter
+    -- number than surrounding context lines.
+    local lnum_hl = info.is_match and 'ExcerptsLnum' or 'ExcerptsContextLnum'
+    local id = vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
+      right_gravity = false,
+      invalidate = false,
+      virt_text = { { string.format('%5d ', info.lnum), lnum_hl } },
+      virt_text_pos = 'inline',
+    })
+    st.marks[id] = rec
 
     if info.annotation then
       vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
+        right_gravity = false,
         virt_text = { { '  ┊ ' .. info.annotation, 'ExcerptsAnnotation' } },
         virt_text_pos = 'eol',
       })
@@ -285,11 +296,13 @@ local function paint(buf, st, preserve)
 
     if info.first_in_file then
       vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
+        right_gravity = false,
         virt_lines = file_header(info.relname, info.is_first_file),
         virt_lines_above = true,
       })
     elseif info.block_divider then
       vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
+        right_gravity = false,
         virt_lines = block_divider(info.gap),
         virt_lines_above = true,
       })
@@ -297,7 +310,7 @@ local function paint(buf, st, preserve)
 
     -- Highlight the matched span(s) on the line, above syntax highlighting.
     if info.spans then
-      local len = #linetext
+      local len = #info.source
       for _, span in ipairs(info.spans) do
         local scol = math.max(0, math.min(span[1], len))
         local ecol = math.max(scol, math.min(span[2], len))
@@ -314,44 +327,7 @@ local function paint(buf, st, preserve)
   end
 
   vim.bo[buf].undolevels = save_undolevels
-  vim.bo[buf].modified = kept > 0
-
-  if pending_n > kept then
-    vim.notify(
-      string.format('excerpts: %d edit(s) on now-hidden lines discarded', pending_n - kept),
-      vim.log.levels.WARN
-    )
-  end
-end
-
--- 'commentstring' for a file, derived from its name and cached per filetype.
--- (Empty unless filetype plugins are enabled, which they are in normal sessions.)
-local cs_cache = {}
-local function commentstring_for(filename)
-  local ft = vim.filetype.match({ filename = filename })
-  if not ft or ft == '' then
-    return ''
-  end
-  local cs = cs_cache[ft]
-  if cs == nil then
-    local ok, val = pcall(vim.filetype.get_option, ft, 'commentstring')
-    cs = (ok and val) or ''
-    cs_cache[ft] = cs
-  end
-  return cs
-end
-
--- Keep 'commentstring' matching the source file under the cursor so `gcc` (and
--- any comment plugin) uses each excerpt's own language syntax.
-local function update_commentstring(buf)
-  local win = vim.api.nvim_get_current_win()
-  if vim.api.nvim_win_get_buf(win) ~= buf then
-    return
-  end
-  local rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
-  if rec then
-    vim.bo[buf].commentstring = commentstring_for(rec.filename)
-  end
+  vim.bo[buf].modified = false
 end
 
 --- Render a source model into a new excerpts view. Returns (buf, win).
@@ -372,7 +348,7 @@ function M.open(source)
   end
   st.view = { title = source.title, files = files, files_by_name = by_name }
 
-  paint(buf, st, false)
+  paint(buf, st)
 
   -- 'acwrite' makes `:w` fire BufWriteCmd instead of writing a file named after
   -- the buffer; the editor module turns that into per-source-file writes.
@@ -428,7 +404,7 @@ function M.repaint(buf)
     cursor_rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   end
 
-  paint(buf, st, true)
+  paint(buf, st)
 
   if cursor_rec and vim.api.nvim_win_get_buf(win) == buf then
     local target = row_for(buf, st, cursor_rec.filename, cursor_rec.lnum)

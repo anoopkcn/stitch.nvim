@@ -181,31 +181,45 @@ q           Close the view (closes the window, or deletes the buffer if it is
 -           Collapse: show less context around the excerpt under the cursor
             (floor of 0). Count-aware, like `+`.
 
+The view does not remap editing keys: `gc`/`gcc`, `dd`, `J`, `o`, `p` and the
+rest are stock Neovim. See |excerpts-editing| for how those edits are written
+back, and the |excerpts-editing| "Commenting" note for `gc` language handling.
+
 See |excerpts-context-lines| for how expand/collapse behave.
 
 ==============================================================================
 7. EDITING & WRITE-BACK                                   *excerpts-editing*
 
-Edit excerpt lines as if they were an ordinary buffer, then `:w`. Every
-changed line is written back to its source file, and all touched files are
-saved together.
+Edit the buffer with any native command — change text, `dd`, `J`, `o`, paste,
+split a line into several, `gcc` to comment — then `:w`. Changes are written
+back to the correct source files and all touched files are saved together.
+There are no plugin-specific editing maps.
 
-The edit model is strict 1:1 line mapping:
+On `:w` the buffer is diffed against the text painted when the view was opened
+(or last saved). Each diff hunk is mapped back to its source range via the
+per-row anchors and rewritten with |nvim_buf_set_lines|, so in-place edits,
+line *deletion*, *insertion*, and *multi-line* changes are all written back —
+the diff reconciles whatever state the buffer ends up in, with no
+command-specific handling.
 
-  • Editing the text of an existing excerpt line is written back.
-  • Lines you *insert* (which have no source location) are ignored.
-  • Excerpts you *delete* are ignored — the source line is left as-is.
-  • If a source line changed underneath you since the view opened, that
-    excerpt is flagged inline with `‹ source changed — not written ›`
+Two guarantees bound what is written:
+
+  • If a source line changed underneath you since the view opened, that edit is
+    flagged inline with `‹ source changed — not written ›`
     (see |ExcerptsDivergent|) and skipped — never clobbered.
+  • A hunk that cannot be mapped to a single source range — it spans two files,
+    or a structural change straddles a block boundary — is flagged
+    `‹ cannot map edit (spans files/blocks) — not written ›` and skipped rather
+    than guessed at.
 
-Inserting and deleting lines inside an excerpt is a deliberate non-goal — use
-|excerpts-bulk-edits| for structural cross-file changes.
+A clean save re-renders the view (fresh line numbers; this clears undo). A save
+with skips keeps the buffer and its inline flags so you can resolve the conflict
+and save again.
 
 After `:w` a summary is shown, e.g.: >
-    excerpts: wrote 3 line(s) in 2 file(s)
+    excerpts: wrote 3 edit(s) in 2 file(s)
 <
-with any skipped (source-changed) or ignored (deleted) counts appended.
+with any skipped counts appended.
 
 Note: write-back goes through each source buffer and writes it, so saving the
 excerpts buffer behaves like saving those files directly — it also persists
@@ -213,12 +227,15 @@ any other unsaved changes in them and triggers their |BufWritePre| /
 |BufWritePost| autocommands. If you use format-on-save, every touched file is
 formatted on `:w`.
 
-'commentstring' tracking~
+Commenting~
 
-As the cursor moves, the view's 'commentstring' is set to that of the source
-file under the cursor (derived from its filename). So `gcc` and comment
-plugins comment each excerpt in its own language, even in a mixed-language
-view.
+`gc`/`gcc` are stock Neovim commenting. Because the view aggregates many files,
+'commentstring' is kept in sync with the source file under the cursor, so
+commenting uses each excerpt's own language (Lua with `--`, Python with `#`,
+...). A single-line or single-file comment is exact. A multi-line `gc` spanning
+*different* languages uses the cursor line's syntax — Neovim's built-in
+commenting resolves one 'commentstring' per invocation, a limitation no buffer
+setting can lift.
 
 ==============================================================================
 8. BULK EDITS                                          *excerpts-bulk-edits*
@@ -228,8 +245,9 @@ commands operate on the same set with no extra plugin code: >
     :cdo s/old/new/ | update     " substitute across every excerpt's line
     :cfdo %s/old/new/g | update   " substitute across every file in the list
 <
-This is the supported path for structural edits (inserting/deleting lines,
-multi-line refactors) that the in-view 1:1 editor intentionally does not do.
+This complements in-view editing: edit excerpts directly for hand changes
+(including deletion, insertion, and multi-line edits), or use `:cdo`/`:cfdo` for
+a uniform substitution across every entry in one pass.
 
 Note: the grep, references, and diagnostics sources replace the quickfix list
 when they run; the |:Excerpts-qf| source reads it without replacing it.
