@@ -11,6 +11,7 @@ local config = require('excerpts.config')
 local model = require('excerpts.model')
 local reconcile = require('excerpts.reconcile')
 local intent = require('excerpts.intent')
+local srclang = require('excerpts.lang')
 
 local M = {}
 
@@ -163,22 +164,6 @@ local function set_keymaps(buf)
   end
 end
 
--- 'commentstring' for a file, derived from its name and cached per filetype.
-local cs_cache = {}
-local function commentstring_for(filename)
-  local ft = vim.filetype.match({ filename = filename })
-  if not ft or ft == '' then
-    return ''
-  end
-  local cs = cs_cache[ft]
-  if cs == nil then
-    local ok, val = pcall(vim.filetype.get_option, ft, 'commentstring')
-    cs = (ok and val) or ''
-    cs_cache[ft] = cs
-  end
-  return cs
-end
-
 -- Native `gc`/`gcc` reads 'commentstring' to choose the comment syntax — pure
 -- source text doesn't tell it the language. Keep it matching the source file
 -- under the cursor so commenting uses each excerpt's own syntax. (Single-line
@@ -192,7 +177,7 @@ local function update_commentstring(buf)
   end
   local rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   if rec then
-    vim.bo[buf].commentstring = commentstring_for(rec.filename)
+    vim.bo[buf].commentstring = srclang.commentstring(rec.filename)
     -- Remember the file under the cursor so a line inserted next is attributed
     -- to it. Only updates on real excerpt lines, so it survives the cursor
     -- landing on a freshly-inserted (unanchored) line.

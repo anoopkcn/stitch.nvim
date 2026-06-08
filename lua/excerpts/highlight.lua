@@ -15,34 +15,11 @@
 local config = require('excerpts.config')
 local render = require('excerpts.render')
 local intent = require('excerpts.intent')
+local srclang = require('excerpts.lang')
 
 local M = {}
 
 local hl_ns = vim.api.nvim_create_namespace('excerpts_highlight')
-
--- filename -> lang string, or false when the file has no Treesitter grammar.
-local lang_cache = {}
-
---- Resolve the Treesitter language for a file from its name (pure, cached).
-local function lang_for(filename)
-  if not filename then
-    return nil
-  end
-  local cached = lang_cache[filename]
-  if cached ~= nil then
-    return cached or nil
-  end
-  local lang = false
-  local ft = vim.filetype.match({ filename = filename })
-  if ft and ft ~= '' then
-    local l = vim.treesitter.language.get_lang(ft)
-    if l and pcall(vim.treesitter.language.add, l) then
-      lang = l
-    end
-  end
-  lang_cache[filename] = lang
-  return lang or nil
-end
 
 -- Language of buffer row `row` (0-based) and whether it begins a new block.
 -- Existing rows take the language of their source file; an inserted line takes
@@ -50,9 +27,9 @@ end
 local function row_lang(buf, map, row)
   local info = map[row + 1]
   if info and info.filename then
-    return lang_for(info.filename), (info.first_in_file or info.block_divider) == true
+    return srclang.ts_lang(info.filename), (info.first_in_file or info.block_divider) == true
   end
-  return lang_for(intent.at(buf, row)), false
+  return srclang.ts_lang(intent.at(buf, row)), false
 end
 
 -- Recompute each language's included regions (one region per contiguous
