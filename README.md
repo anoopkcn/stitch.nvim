@@ -98,13 +98,23 @@ Defaults:
 
 ```lua
 require('multibuffers').setup({
-  window = 'split', -- 'split' | 'vsplit' | 'tab' | 'current'
+  window = 'split',  -- 'split' | 'vsplit' | 'tab' | 'current'
+  highlight = true,  -- project Treesitter syntax highlighting onto excerpts
   keys = {
     jump = '<CR>',
     close = 'q',
   },
 })
 ```
+
+### Syntax highlighting
+
+Each excerpt is syntax-highlighted with its **source file's** Treesitter
+grammar, so a view mixing Lua, Python and Markdown shows each line in the right
+colours. The language is derived from the filename, so source files are read but
+not filetype-detected — no LSP is started just to colour an excerpt. Files
+without a Treesitter parser simply render uncoloured. Disable with
+`highlight = false`.
 
 ### Highlight groups
 

@@ -212,6 +212,8 @@ function M.open(model)
     end,
   })
 
+  require('multibuffers.highlight').ensure()
+
   local win = open_window(buf)
   set_keymaps(buf)
   -- Land on the first excerpt, not the blank spacer at row 0.

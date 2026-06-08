@@ -6,6 +6,9 @@ M.defaults = {
   -- 'split' | 'vsplit' | 'tab' | 'current'
   window = 'split',
 
+  -- Project Treesitter syntax highlighting from each source onto the excerpts.
+  highlight = true,
+
   -- Buffer-local keymaps inside the multibuffer view.
   keys = {
     jump = '<CR>', -- open the source file at the line under the cursor
