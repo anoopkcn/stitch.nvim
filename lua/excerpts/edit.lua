@@ -15,6 +15,7 @@
 -- skipped.
 local render = require('excerpts.render')
 local model = require('excerpts.model')
+local intent = require('excerpts.intent')
 
 local M = {}
 
@@ -99,7 +100,7 @@ local function plan_hunk(hunk, origin, current, buf)
         -- File boundary: join the file the line was created in (intent), else
         -- default to the following file. (`o` below the file above and `O` above
         -- the file below produce the same buffer; intent is the only signal.)
-        if render.intent_at(buf, sb - 1) == before.filename then
+        if intent.at(buf, sb - 1) == before.filename then
           ref, l0 = before, before.lnum + 1 -- append to the file above
         else
           ref, l0 = after, after.lnum -- prepend to the file below

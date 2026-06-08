@@ -10,6 +10,7 @@
 local config = require('excerpts.config')
 local model = require('excerpts.model')
 local reconcile = require('excerpts.reconcile')
+local intent = require('excerpts.intent')
 
 local M = {}
 
@@ -29,13 +30,8 @@ M.ns = ns
 -- namespace so record_at/the editor never see them).
 local match_ns = vim.api.nvim_create_namespace('excerpts_match')
 
--- Records, per inserted line, the file the user was editing when they created it
--- (`st.cursor_file` at insert time). A line inserted exactly at a file boundary is
--- otherwise ambiguous — `o` below file A's last line and `O` above file B's first
--- line produce the same buffer — so this intent decides which file it joins, for
--- both the header layout and write-back. Survives later edits (it's a tracking
--- extmark) and is cleared on (re)paint, which establishes a fresh baseline.
-local intent_ns = vim.api.nvim_create_namespace('excerpts_intent')
+-- Per-inserted-line attribution (which file an ambiguous boundary insert joins)
+-- lives in the `excerpts.intent` module; render only calls into it.
 
 local function setup_highlights()
   local set = function(name, val)
@@ -200,26 +196,8 @@ local function update_commentstring(buf)
     -- Remember the file under the cursor so a line inserted next is attributed
     -- to it. Only updates on real excerpt lines, so it survives the cursor
     -- landing on a freshly-inserted (unanchored) line.
-    local st = M.state[buf]
-    if st then
-      st.cursor_file = rec.filename
-    end
+    intent.note_cursor(buf, rec.filename)
   end
-end
-
---- The file an inserted line was tagged with (the file being edited when it was
---- created), or nil. `row` is 0-based.
-function M.intent_at(buf, row)
-  local st = M.state[buf]
-  if not st or not st.intent then
-    return nil
-  end
-  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, intent_ns, { row, 0 }, { row, -1 }, {})) do
-    if st.intent[m[1]] then
-      return st.intent[m[1]]
-    end
-  end
-  return nil
 end
 
 --- Look up the source record for a buffer row (0-indexed).
@@ -314,20 +292,6 @@ end
 -- Width of the inline line-number gutter ('%5d ' is 5 digits + a space).
 local GUTTER = string.rep(' ', 6)
 
--- Intent of an inserted line (0-based row): the file it joins. Reads the row's
--- intent mark, creating one tagged with the file currently being edited if the
--- line is newly inserted. Returns the filename (or nil if unknown).
-local function row_intent(buf, st, row)
-  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, intent_ns, { row, 0 }, { row, -1 }, {})) do
-    if st.intent[m[1]] ~= nil then
-      return st.intent[m[1]]
-    end
-  end
-  local id = vim.api.nvim_buf_set_extmark(buf, intent_ns, row, 0, { right_gravity = false })
-  st.intent[id] = st.cursor_file or false
-  return st.cursor_file
-end
-
 -- Place every per-row decoration for the current buffer from `rows`: rows[r+1] is
 -- the source info for buffer row r, or false for a row with no source (the row-0
 -- spacer, or a line the user inserted). Mapped rows get their line number, the
@@ -348,7 +312,7 @@ local function decorate(buf, st, rows)
       -- Inserted line (no source yet): tag it with the file being edited (so a
       -- boundary insert knows which file it joins) and give it a blank gutter so
       -- it stays aligned instead of shifting to column 0.
-      row_intent(buf, st, row)
+      intent.tag(buf, row)
       vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
         right_gravity = false,
         virt_text = { { GUTTER, 'ExcerptsContextLnum' } },
@@ -389,8 +353,8 @@ local function decorate(buf, st, rows)
         -- above stays under that file (header stays put).
         local hrow = row
         while hrow - 1 >= 1 and not rows[hrow] do
-          local intent = row_intent(buf, st, hrow - 1)
-          if intent and intent ~= info.filename then
+          local tagged = intent.tag(buf, hrow - 1)
+          if tagged and tagged ~= info.filename then
             break
           end
           hrow = hrow - 1
@@ -453,8 +417,7 @@ local function paint(buf, st)
   st.live = nil
   -- Fresh baseline: every line now maps to source, so there are no pending
   -- insertions to attribute.
-  vim.api.nvim_buf_clear_namespace(buf, intent_ns, 0, -1)
-  st.intent = {}
+  intent.reset(buf)
   -- The layout changed wholesale; have the highlighter recompute its block
   -- regions on the next redraw.
   st.ts_regions_count = nil
@@ -585,6 +548,7 @@ function M.open(source)
     buffer = buf,
     once = true,
     callback = function()
+      intent.discard(buf)
       M.state[buf] = nil
     end,
   })

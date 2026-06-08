@@ -14,6 +14,7 @@
 -- changed, or a repaint) shifts the block ranges and re-applies the regions.
 local config = require('excerpts.config')
 local render = require('excerpts.render')
+local intent = require('excerpts.intent')
 
 local M = {}
 
@@ -51,7 +52,7 @@ local function row_lang(buf, map, row)
   if info and info.filename then
     return lang_for(info.filename), (info.first_in_file or info.block_divider) == true
   end
-  return lang_for(render.intent_at(buf, row)), false
+  return lang_for(intent.at(buf, row)), false
 end
 
 -- Recompute each language's included regions (one region per contiguous
