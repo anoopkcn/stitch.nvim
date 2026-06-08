@@ -9,6 +9,10 @@ M.defaults = {
   -- Project Treesitter syntax highlighting from each source onto the excerpts.
   highlight = true,
 
+  -- Lines of surrounding source context to show above and below each match.
+  -- 0 = just the match line. Context lines are editable like any excerpt.
+  context = 0,
+
   -- Buffer-local keymaps inside the multibuffer view.
   keys = {
     jump = '<CR>', -- open the source file at the line under the cursor

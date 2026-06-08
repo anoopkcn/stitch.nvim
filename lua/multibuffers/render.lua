@@ -26,6 +26,7 @@ local function setup_highlights()
   end
   set('MultibuffersHeader', { link = 'Directory' })
   set('MultibuffersLnum', { link = 'LineNr' })
+  set('MultibuffersContextLnum', { link = 'NonText' })
   set('MultibuffersAnnotation', { link = 'Comment' })
   set('MultibuffersSeparator', { link = 'NonText' })
 end
@@ -49,6 +50,13 @@ local function file_header(relname, is_first)
   end
   lines[#lines + 1] = { { '▌ ' .. relname, 'MultibuffersHeader' } }
   return lines
+end
+
+-- Divider shown between two non-adjacent blocks of the same file (a gap of
+-- `gap` hidden source lines).
+local function block_divider(gap)
+  local label = gap > 0 and string.format('   ⋮ %d lines', gap) or '   ⋮'
+  return { { { label, 'MultibuffersSeparator' } } }
 end
 
 local function open_window(buf)
@@ -128,21 +136,28 @@ function M.open(model)
   local lines = { '' }
   local infos = {}
   for fi, f in ipairs(model.files) do
-    for ii, item in ipairs(f.items) do
-      local row = #lines
-      lines[#lines + 1] = item.source
-      infos[#infos + 1] = {
-        row = row,
-        filename = f.filename,
-        relname = f.relname,
-        bufnr = f.bufnr,
-        lnum = item.lnum,
-        col = item.col,
-        source = item.source,
-        annotation = item.annotation,
-        first_in_file = (ii == 1),
-        is_first_file = (fi == 1),
-      }
+    for bi, block in ipairs(f.blocks) do
+      local prev = f.blocks[bi - 1]
+      local gap = prev and (block.lines[1].lnum - prev.lines[#prev.lines].lnum - 1) or 0
+      for li, line in ipairs(block.lines) do
+        local row = #lines
+        lines[#lines + 1] = line.source
+        infos[#infos + 1] = {
+          row = row,
+          filename = f.filename,
+          relname = f.relname,
+          bufnr = f.bufnr,
+          lnum = line.lnum,
+          col = line.col,
+          source = line.source,
+          annotation = line.annotation,
+          is_match = line.is_match,
+          first_in_file = (bi == 1 and li == 1),
+          is_first_file = (fi == 1),
+          block_divider = (bi > 1 and li == 1),
+          gap = gap,
+        }
+      end
     end
   end
 
@@ -155,10 +170,12 @@ function M.open(model)
 
   for _, info in ipairs(infos) do
     -- Anchor extmark + inline source line number. Doubles as the line address.
+    -- Match lines get a brighter number than surrounding context lines.
+    local lnum_hl = info.is_match and 'MultibuffersLnum' or 'MultibuffersContextLnum'
     local id = vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
       right_gravity = false,
       invalidate = true,
-      virt_text = { { string.format('%5d ', info.lnum), 'MultibuffersLnum' } },
+      virt_text = { { string.format('%5d ', info.lnum), lnum_hl } },
       virt_text_pos = 'inline',
     })
     st.marks[id] = {
@@ -179,6 +196,11 @@ function M.open(model)
     if info.first_in_file then
       vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
         virt_lines = file_header(info.relname, info.is_first_file),
+        virt_lines_above = true,
+      })
+    elseif info.block_divider then
+      vim.api.nvim_buf_set_extmark(buf, ns, info.row, 0, {
+        virt_lines = block_divider(info.gap),
         virt_lines_above = true,
       })
     end

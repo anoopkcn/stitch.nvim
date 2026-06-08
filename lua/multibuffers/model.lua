@@ -1,12 +1,16 @@
--- Turns a flat list of quickfix-style items into a grouped model:
---   { title, files = { { filename, relname, bufnr, items = { {lnum,col,source,annotation} } } } }
+-- Turns a flat list of quickfix-style items into a grouped, blocked model:
+--   { title, files = { { filename, relname, bufnr, blocks = {
+--       { lines = { { lnum, source, is_match, col, annotation } } } } } } }
 --
--- The model reads the *real* source line for each item (not the quickfix `text`,
--- which for diagnostics is the message rather than the code). The original line
--- text is kept on each item so v0.2 write-back can detect source divergence.
+-- Each match line can be surrounded by `config.context` lines above/below. Per
+-- file, the expanded ranges are merged so overlapping/adjacent context is shown
+-- once; a gap between blocks becomes a divider at render time. Every line
+-- (match or context) maps 1:1 to a source line, so all of them are editable and
+-- written back — context lines included.
+local config = require('multibuffers.config')
+
 local M = {}
 
--- Read all lines of a file, preferring a loaded buffer over disk.
 local function read_lines(filename, bufnr)
   if bufnr and bufnr > 0 and vim.api.nvim_buf_is_loaded(bufnr) then
     return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -31,10 +35,36 @@ local function resolve_filename(item)
   return nil
 end
 
---- Build a grouped model from quickfix-style items.
+-- Expand match line numbers by `n` context lines, clamp to the file, and merge
+-- overlapping/adjacent ranges. Returns a list of { s, e } (inclusive, 1-based).
+local function blocks_from_matches(match_lnums, n, line_count)
+  local ranges = {}
+  for _, ml in ipairs(match_lnums) do
+    local s = math.max(1, ml - n)
+    local e = math.min(line_count, ml + n)
+    if s <= e then
+      ranges[#ranges + 1] = { s = s, e = e }
+    end
+  end
+  -- match_lnums is sorted, so ranges are sorted by start.
+  local blocks = {}
+  for _, r in ipairs(ranges) do
+    local last = blocks[#blocks]
+    if last and r.s <= last.e + 1 then
+      last.e = math.max(last.e, r.e)
+    else
+      blocks[#blocks + 1] = { s = r.s, e = r.e }
+    end
+  end
+  return blocks
+end
+
+--- Build a grouped, blocked model from quickfix-style items.
 --- @param items table[] quickfix items ({ filename|bufnr, lnum, col, text, type })
 --- @param title string|nil
 function M.from_items(items, title)
+  local context = config.options.context or 0
+
   local by_file = {}
   local order = {}
 
@@ -49,21 +79,15 @@ function M.from_items(items, title)
             filename = fname,
             relname = vim.fn.fnamemodify(fname, ':.'),
             bufnr = (it.bufnr and it.bufnr > 0) and it.bufnr or nil,
-            items = {},
-            _seen = {},
+            matches = {}, -- lnum -> { col, qftext, type }
+            match_lnums = {},
           }
           by_file[fname] = f
           order[#order + 1] = fname
         end
-        -- One excerpt per source line (dedupe multiple matches on the same line).
-        if not f._seen[lnum] then
-          f._seen[lnum] = true
-          f.items[#f.items + 1] = {
-            lnum = lnum,
-            col = it.col or 1,
-            qftext = it.text or '',
-            type = it.type,
-          }
+        if not f.matches[lnum] then -- one excerpt per source line
+          f.matches[lnum] = { col = it.col or 1, qftext = it.text or '', type = it.type }
+          f.match_lnums[#f.match_lnums + 1] = lnum
         end
       end
     end
@@ -72,22 +96,38 @@ function M.from_items(items, title)
   local files = {}
   for _, fname in ipairs(order) do
     local f = by_file[fname]
-    table.sort(f.items, function(a, b)
-      return a.lnum < b.lnum
-    end)
+    table.sort(f.match_lnums)
     local lines = read_lines(f.filename, f.bufnr)
-    for _, item in ipairs(f.items) do
-      local src = lines[item.lnum] or ''
-      item.source = src
-      -- Show the quickfix text as an annotation only when it carries information
-      -- beyond the source line itself (e.g. a diagnostic message).
-      local trimmed = vim.trim(item.qftext)
-      if trimmed ~= '' and trimmed ~= vim.trim(src) then
-        item.annotation = trimmed
+    local line_count = #lines
+
+    local blocks = {}
+    for _, range in ipairs(blocks_from_matches(f.match_lnums, context, line_count)) do
+      local block_lines = {}
+      for lnum = range.s, range.e do
+        local match = f.matches[lnum]
+        local src = lines[lnum] or ''
+        local annotation
+        if match then
+          local trimmed = vim.trim(match.qftext)
+          if trimmed ~= '' and trimmed ~= vim.trim(src) then
+            annotation = trimmed
+          end
+        end
+        block_lines[#block_lines + 1] = {
+          lnum = lnum,
+          source = src,
+          is_match = match ~= nil,
+          col = match and match.col or 1,
+          annotation = annotation,
+        }
       end
+      blocks[#blocks + 1] = { lines = block_lines }
     end
-    f._seen = nil
-    files[#files + 1] = f
+
+    if #blocks > 0 then
+      files[#files + 1] =
+        { filename = f.filename, relname = f.relname, bufnr = f.bufnr, blocks = blocks }
+    end
   end
 
   return { title = title or 'Multibuffers', files = files }

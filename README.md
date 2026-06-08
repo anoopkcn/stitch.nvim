@@ -100,12 +100,22 @@ Defaults:
 require('multibuffers').setup({
   window = 'split',  -- 'split' | 'vsplit' | 'tab' | 'current'
   highlight = true,  -- project Treesitter syntax highlighting onto excerpts
+  context = 0,       -- lines of source context shown above/below each match
   keys = {
     jump = '<CR>',
     close = 'q',
   },
 })
 ```
+
+### Context lines
+
+Set `context = N` to show N source lines above and below each match. Overlapping
+or adjacent context within a file is merged into one block, and a gap between
+blocks is shown as a `⋮ N lines` divider. Context lines are dimmer than match
+lines but are **fully editable** — editing one writes back to its source line
+just like a match. So `context` is also a quick way to edit a few lines around
+each hit without leaving the view.
 
 ### Syntax highlighting
 
