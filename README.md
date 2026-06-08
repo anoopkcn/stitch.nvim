@@ -66,7 +66,8 @@ header. Diagnostics show their message as a trailing annotation.
 
 Edit excerpt lines as if they were an ordinary buffer, then `:w` — every changed
 line is written back to its source file, and all touched files are saved
-together.
+together. `commentstring` tracks the source file under the cursor, so `gcc` (and
+comment plugins) comment each excerpt in its own language.
 
 v0.2 is **strict 1:1 line editing**:
 

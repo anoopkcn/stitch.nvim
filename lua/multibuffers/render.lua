@@ -324,6 +324,36 @@ local function paint(buf, st, preserve)
   end
 end
 
+-- 'commentstring' for a file, derived from its name and cached per filetype.
+-- (Empty unless filetype plugins are enabled, which they are in normal sessions.)
+local cs_cache = {}
+local function commentstring_for(filename)
+  local ft = vim.filetype.match({ filename = filename })
+  if not ft or ft == '' then
+    return ''
+  end
+  local cs = cs_cache[ft]
+  if cs == nil then
+    local ok, val = pcall(vim.filetype.get_option, ft, 'commentstring')
+    cs = (ok and val) or ''
+    cs_cache[ft] = cs
+  end
+  return cs
+end
+
+-- Keep 'commentstring' matching the source file under the cursor so `gcc` (and
+-- any comment plugin) uses each excerpt's own language syntax.
+local function update_commentstring(buf)
+  local win = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_buf(win) ~= buf then
+    return
+  end
+  local rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
+  if rec then
+    vim.bo[buf].commentstring = commentstring_for(rec.filename)
+  end
+end
+
 --- Render a source model into a new multibuffer view. Returns (buf, win).
 function M.open(source)
   local buf = vim.api.nvim_create_buf(true, true)
@@ -370,10 +400,18 @@ function M.open(source)
 
   require('multibuffers.highlight').ensure()
 
+  vim.api.nvim_create_autocmd('CursorMoved', {
+    buffer = buf,
+    callback = function()
+      update_commentstring(buf)
+    end,
+  })
+
   local win = open_window(buf)
   set_keymaps(buf)
   -- Land on the first excerpt, not the blank spacer at row 0.
   pcall(vim.api.nvim_win_set_cursor, win, { math.min(2, vim.api.nvim_buf_line_count(buf)), 0 })
+  update_commentstring(buf) -- initial, before the cursor first moves
   return buf, win
 end
 
