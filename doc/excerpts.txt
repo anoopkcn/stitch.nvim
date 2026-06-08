@@ -1,0 +1,461 @@
+*excerpts.txt*  View and edit excerpts from many files in a single buffer
+
+Author:  @anoopkcn <https://github.com/anoopkcn>
+License: MIT
+
+==============================================================================
+CONTENTS                                                  *excerpts-contents*
+
+1. Introduction ............................ |excerpts-introduction|
+2. Requirements ............................ |excerpts-requirements|
+3. Quick Start ............................. |excerpts-quickstart|
+4. Commands ................................ |excerpts-commands|
+    4.1 :Excerpts grep ..................... |:Excerpts-grep|
+    4.2 :Excerpts references ............... |:Excerpts-references|
+    4.3 :Excerpts diagnostics .............. |:Excerpts-diagnostics|
+    4.4 :Excerpts qf ....................... |:Excerpts-qf|
+5. The View ................................ |excerpts-view|
+6. Mappings ................................ |excerpts-mappings|
+7. Editing & Write-back .................... |excerpts-editing|
+8. Bulk Edits .............................. |excerpts-bulk-edits|
+9. Context Lines ........................... |excerpts-context-lines|
+10. Highlighting ........................... |excerpts-highlighting|
+11. Configuration .......................... |excerpts-configuration|
+12. Highlight Groups ....................... |excerpts-highlight-groups|
+13. Functions .............................. |excerpts-functions|
+14. Not in Scope ........................... |excerpts-not-in-scope|
+
+==============================================================================
+1. INTRODUCTION                                      *excerpts* *excerpts-introduction*
+
+Excerpts gathers lines from many files into a single, grouped, editable
+buffer — Neovim's take on Zed's multibuffers
+<https://zed.dev/docs/multibuffers>.
+
+Populate one view from a project search, LSP references, diagnostics, or the
+current quickfix list, read it top-to-bottom, jump straight to any source
+line, and edit excerpt lines in place — `:w` writes every change back to its
+source file at once.
+
+Highlights:
+  • Four sources: project grep, LSP references, diagnostics, quickfix list
+  • Quickfix-backed, so |:cdo| / |:cfdo| bulk edits work on the same set
+  • Strict 1:1 editing with a source-divergence guard (never clobbers)
+  • Per-excerpt source context with interactive expand/collapse
+  • Cross-file Treesitter syntax highlighting (each line in its own language)
+  • Jump back to any source location with a single key
+
+Use cases:
+  • Read every hit of a search with a few lines of context around each
+  • Review and fix all project diagnostics in one place
+  • Edit every reference to a symbol without hopping between files
+  • Turn a quickfix list into a readable, editable working set
+
+==============================================================================
+2. REQUIREMENTS                                      *excerpts-requirements*
+
+  • Neovim 0.11+ (developed against 0.12.x)
+  • ripgrep <https://github.com/BurntSushi/ripgrep> (`rg`) on $PATH, for the
+    grep source only. References, diagnostics, and quickfix sources need no
+    external tools.
+
+==============================================================================
+3. QUICK START                                        *excerpts-quickstart*
+
+Excerpts works out of the box. The |:Excerpts| command is registered at
+startup by plugin/excerpts.lua, so |excerpts.setup()| is optional — call it
+only to override defaults.
+
+With lazy.nvim: >
+    {
+      'excerpts.nvim',
+      opts = {}, -- calls require('excerpts').setup()
+    }
+<
+Try it: >
+    :Excerpts grep TODO          " every TODO in the project
+    :Excerpts references         " every reference to the symbol under cursor
+    :Excerpts diagnostics        " every project diagnostic
+<
+Inside the view: read down the buffer, press <CR> on any line to open its
+source, edit lines in place and `:w` to save them back, or `q` to close.
+
+==============================================================================
+4. COMMANDS                                              *excerpts-commands*
+
+All sources are reached through a single command with a subcommand: >
+    :Excerpts {grep|references|diagnostics|qf} [args]
+<
+                                                                  *:Excerpts*
+Tab-completion completes the subcommand name in the first argument position.
+Each source funnels through the quickfix list (kept in sync so |:cdo| /
+|:cfdo| operate on the same set) and then renders the excerpts view on top.
+If a source produces no results, a notification is shown and no view opens.
+
+------------------------------------------------------------------------------
+4.1 :Excerpts grep                                          *:Excerpts-grep*
+
+Open a view from a project-wide ripgrep search. >
+    :Excerpts grep {pattern}
+<
+The remaining arguments are joined with spaces and passed to ripgrep as the
+search pattern. If no pattern is given, you are prompted for one.
+
+One excerpt is created per matched line; the exact matched span(s) on each
+line are underlined (see |ExcerptsMatch|). Requires `rg` on $PATH.
+
+Examples: >
+    :Excerpts grep TODO
+    :Excerpts grep function foo
+    :Excerpts grep \bstruct\s+\w+
+<
+------------------------------------------------------------------------------
+4.2 :Excerpts references                              *:Excerpts-references*
+
+Open a view of all references to the symbol under the cursor. >
+    :Excerpts references
+<
+Queries every attached LSP client that supports `textDocument/references`
+(with `includeDeclaration = true`) and aggregates the locations. Requires a
+language server attached to the current buffer.
+
+------------------------------------------------------------------------------
+4.3 :Excerpts diagnostics                            *:Excerpts-diagnostics*
+
+Open a view of all project diagnostics. >
+    :Excerpts diagnostics
+<
+Collects every diagnostic from |vim.diagnostic.get()| across all buffers. Each
+excerpt shows the offending source line; the diagnostic message is shown as a
+trailing annotation (see |ExcerptsAnnotation|).
+
+------------------------------------------------------------------------------
+4.4 :Excerpts qf                                              *:Excerpts-qf*
+
+Build a view from the current quickfix list. >
+    :Excerpts qf
+<
+Uses the quickfix list exactly as it stands — populate it however you like
+(|:grep|, |:vimgrep|, |:cexpr|, another plugin) and turn it into an excerpts
+view. Unlike the other sources, this does not replace the quickfix list. If
+the list is empty, a notification is shown.
+
+==============================================================================
+5. THE VIEW                                                  *excerpts-view*
+
+The view is a dedicated, editable scratch buffer (filetype `excerpts`,
+buftype `acwrite`). It is opened where |excerpts-window| says.
+
+Layout:
+  • Excerpts are grouped by file under a `▌ {relative path}` header.
+  • Each line shows its source line number inline on the left.
+  • Match lines carry a brighter line number than surrounding context lines.
+  • The matched span(s) are underlined on top of syntax highlighting.
+  • Diagnostic (or other quickfix) messages appear as a trailing annotation.
+  • When context hides part of a file, a `⋮ N lines` divider marks the gap.
+
+Each real line maps 1:1 to one source line. There is one excerpt per source
+line even if a line has several matches — their spans are all underlined.
+Files that cannot be read (or are empty) are skipped.
+
+==============================================================================
+6. MAPPINGS                                              *excerpts-mappings*
+
+These buffer-local mappings are active inside the view. The keys are
+configurable via |excerpts-keys|; set one to a false-y value to disable it.
+
+                                                            *excerpts_<CR>*
+<CR>        Open the source file of the line under the cursor, at its line and
+            column. Reuses an existing window in the tab if there is one,
+            otherwise opens a vertical split.
+
+                                                              *excerpts_q*
+q           Close the view (closes the window, or deletes the buffer if it is
+            the last window in the tab).
+
+                                                              *excerpts_+*
++           Expand: show more context around the excerpt under the cursor.
+            Adds |excerpts-context-step| lines, or a count: `10+` adds 10.
+
+                                                              *excerpts_-*
+-           Collapse: show less context around the excerpt under the cursor
+            (floor of 0). Count-aware, like `+`.
+
+See |excerpts-context-lines| for how expand/collapse behave.
+
+==============================================================================
+7. EDITING & WRITE-BACK                                   *excerpts-editing*
+
+Edit excerpt lines as if they were an ordinary buffer, then `:w`. Every
+changed line is written back to its source file, and all touched files are
+saved together.
+
+The edit model is strict 1:1 line mapping:
+
+  • Editing the text of an existing excerpt line is written back.
+  • Lines you *insert* (which have no source location) are ignored.
+  • Excerpts you *delete* are ignored — the source line is left as-is.
+  • If a source line changed underneath you since the view opened, that
+    excerpt is flagged inline with `‹ source changed — not written ›`
+    (see |ExcerptsDivergent|) and skipped — never clobbered.
+
+Inserting and deleting lines inside an excerpt is a deliberate non-goal — use
+|excerpts-bulk-edits| for structural cross-file changes.
+
+After `:w` a summary is shown, e.g.: >
+    excerpts: wrote 3 line(s) in 2 file(s)
+<
+with any skipped (source-changed) or ignored (deleted) counts appended.
+
+Note: write-back goes through each source buffer and writes it, so saving the
+excerpts buffer behaves like saving those files directly — it also persists
+any other unsaved changes in them and triggers their |BufWritePre| /
+|BufWritePost| autocommands. If you use format-on-save, every touched file is
+formatted on `:w`.
+
+'commentstring' tracking~
+
+As the cursor moves, the view's 'commentstring' is set to that of the source
+file under the cursor (derived from its filename). So `gcc` and comment
+plugins comment each excerpt in its own language, even in a mixed-language
+view.
+
+==============================================================================
+8. BULK EDITS                                          *excerpts-bulk-edits*
+
+The view is backed by the quickfix list, so Neovim's built-in cross-file edit
+commands operate on the same set with no extra plugin code: >
+    :cdo s/old/new/ | update     " substitute across every excerpt's line
+    :cfdo %s/old/new/g | update   " substitute across every file in the list
+<
+This is the supported path for structural edits (inserting/deleting lines,
+multi-line refactors) that the in-view 1:1 editor intentionally does not do.
+
+Note: the grep, references, and diagnostics sources replace the quickfix list
+when they run; the |:Excerpts-qf| source reads it without replacing it.
+
+==============================================================================
+9. CONTEXT LINES                                     *excerpts-context-lines*
+
+Set |excerpts-context| to N to show N source lines above and below every
+match. Context lines are dimmer than match lines but are fully editable,
+jumpable, and highlighted just like a match — so `context` is also a quick
+way to edit a few lines around each hit without leaving the view.
+
+Within a file, overlapping or adjacent context blocks are merged into one,
+and a gap between two blocks of the same file is shown as a `⋮ N lines`
+divider.
+
+Interactive expand/collapse~
+
+Press `+` / `-` (see |excerpts-mappings|) to grow or shrink the context around
+the excerpt under the cursor by |excerpts-context-step| lines, or a count:
+`10+`. Expanding raises the context level of every match in the block under
+the cursor; expanding far enough merges neighbouring excerpts, and collapsing
+splits them back.
+
+Because expand/collapse re-lays-out the anchored lines, it resets the buffer's
+undo history:
+  • Pending edits to existing excerpt lines are preserved (and still save).
+  • You cannot `u` across an expand/collapse.
+  • Brand-new lines you typed into the view (which are not anchored to a
+    source line and would not be written by `:w` anyway) are dropped.
+
+==============================================================================
+10. HIGHLIGHTING                                     *excerpts-highlighting*
+
+Syntax highlighting~
+
+Each excerpt is syntax-highlighted with its *source file's* Treesitter
+grammar, so a view mixing Lua, Python, and Markdown shows each line in the
+right colours. The language is derived from the filename, so source files are
+read but never filetype-detected — no LSP is started just to colour an
+excerpt. Files without a Treesitter parser render uncoloured. Disable all
+syntax projection with |excerpts-highlight| = `false`.
+
+Match highlighting~
+
+The matched text itself is marked on top of syntax with a blue underline
+(|ExcerptsMatch|):
+  • grep: the exact search span(s) reported by `rg --json`.
+  • references / diagnostics: the symbol or diagnostic range (single-line
+    ranges only).
+
+==============================================================================
+11. CONFIGURATION                                  *excerpts-configuration*
+
+Pass options to |excerpts.setup()| (or to lazy.nvim's `opts`). Defaults: >
+    require('excerpts').setup({
+      window = 'split',   -- 'split' | 'vsplit' | 'tab' | 'current'
+      highlight = true,   -- project Treesitter highlighting onto excerpts
+      context = 0,        -- source context lines above/below each match
+      context_step = 4,   -- lines added/removed per +/- press
+      keys = {
+        jump = '<CR>',
+        close = 'q',
+        expand = '+',
+        collapse = '-',
+      },
+    })
+<
+------------------------------------------------------------------------------
+                                                          *excerpts-window*
+window~
+    Type: string
+    Default: "split"
+
+Where to open the excerpts view. One of:
+    "split"     horizontal split below (botright)
+    "vsplit"    vertical split on the right (botright)
+    "tab"       a new tab page
+    "current"   reuse the current window
+
+------------------------------------------------------------------------------
+                                                       *excerpts-highlight*
+highlight~
+    Type: boolean
+    Default: true
+
+Project each source file's Treesitter syntax highlighting onto its excerpt
+lines. Set to `false` to render excerpts uncoloured. Match-span underlining
+(|ExcerptsMatch|) is independent of this setting.
+
+------------------------------------------------------------------------------
+                                                         *excerpts-context*
+context~
+    Type: integer
+    Default: 0
+
+Number of source lines to show above and below each match. 0 shows just the
+match line. Context lines are editable, jumpable, and highlighted like
+matches. See |excerpts-context-lines|.
+
+------------------------------------------------------------------------------
+                                                    *excerpts-context-step*
+context_step~
+    Type: integer
+    Default: 4
+
+Lines added or removed per `+` / `-` press. A count on the mapping overrides
+it for that press (e.g. `10+` adds 10 lines regardless of this value).
+
+------------------------------------------------------------------------------
+                                                            *excerpts-keys*
+keys~
+    Type: table
+    Default: { jump = '<CR>', close = 'q', expand = '+', collapse = '-' }
+
+Buffer-local mappings inside the view. See |excerpts-mappings| for what each
+does. Set a field to a false-y value to disable that mapping: >
+    require('excerpts').setup({
+      keys = {
+        jump = '<CR>',
+        close = '<Esc>',   -- close with Esc instead of q
+        expand = false,    -- disable expand
+        collapse = false,  -- disable collapse
+      },
+    })
+<
+==============================================================================
+12. HIGHLIGHT GROUPS                             *excerpts-highlight-groups*
+
+All groups are defined with `default = true`, so any link you set before or
+after setup wins. Override them with |:highlight| (or `nvim_set_hl`).
+
+                                                          *ExcerptsHeader*
+ExcerptsHeader~
+    The `▌ {path}` file header. Default: links to |hl-Directory|.
+
+                                                            *ExcerptsLnum*
+ExcerptsLnum~
+    Inline source line number on a match line. Default: links to |hl-LineNr|.
+
+                                                     *ExcerptsContextLnum*
+ExcerptsContextLnum~
+    Inline source line number on a context line. Default: |hl-NonText|.
+
+                                                           *ExcerptsMatch*
+ExcerptsMatch~
+    The matched span on a line, drawn over syntax. Default: blue underline
+    (`underline`, `sp = #61afef`).
+
+                                                      *ExcerptsAnnotation*
+ExcerptsAnnotation~
+    Trailing annotation (e.g. a diagnostic message). Default: |hl-Comment|.
+
+                                                       *ExcerptsSeparator*
+ExcerptsSeparator~
+    Block dividers and spacing between files. Default: |hl-NonText|.
+
+                                                       *ExcerptsDivergent*
+ExcerptsDivergent~
+    The inline `‹ source changed — not written ›` flag on a skipped excerpt.
+    Default: links to |hl-WarningMsg|.
+
+==============================================================================
+13. FUNCTIONS                                          *excerpts-functions*
+
+The module exposes a small Lua API. Each source function is equivalent to the
+matching |:Excerpts| subcommand.
+
+------------------------------------------------------------------------------
+                                                         *excerpts.setup()*
+excerpts.setup({opts})
+    Optional. Override configuration defaults. The |:Excerpts| command is
+    registered at startup regardless, so the plugin works without calling
+    this.
+
+    Parameters: ~
+        {opts}  (table|nil) Options (see |excerpts-configuration|).
+
+    Example: >
+        require('excerpts').setup({ window = 'vsplit', context = 2 })
+<
+------------------------------------------------------------------------------
+                                                          *excerpts.grep()*
+excerpts.grep({pattern})
+    Open a view from a ripgrep search. Equivalent to |:Excerpts-grep|.
+
+    Parameters: ~
+        {pattern}  (string|nil) Search pattern. Prompts if nil or empty.
+
+    Example: >
+        require('excerpts').grep('TODO')
+<
+------------------------------------------------------------------------------
+                                                    *excerpts.references()*
+excerpts.references()
+    Open a view of all references to the symbol under the cursor. Equivalent
+    to |:Excerpts-references|.
+
+    Example: >
+        require('excerpts').references()
+<
+------------------------------------------------------------------------------
+                                                   *excerpts.diagnostics()*
+excerpts.diagnostics()
+    Open a view of all project diagnostics. Equivalent to
+    |:Excerpts-diagnostics|.
+
+    Example: >
+        require('excerpts').diagnostics()
+<
+------------------------------------------------------------------------------
+                                                    *excerpts.from_qflist()*
+excerpts.from_qflist()
+    Open a view from the current quickfix list. Equivalent to |:Excerpts-qf|.
+
+    Example: >
+        require('excerpts').from_qflist()
+<
+==============================================================================
+14. NOT IN SCOPE                                     *excerpts-not-in-scope*
+
+  • Multi-cursor editing across files. Zed's headline "wide refactor" mechanism
+    has no Neovim equivalent and is intentionally not implemented — use
+    |excerpts-bulk-edits| (|:cdo| / |:cfdo|) over the quickfix list instead.
+  • Inserting or deleting lines *inside* an excerpt (structural in-view edits).
+    Edits are strictly 1:1; see |excerpts-editing|.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
