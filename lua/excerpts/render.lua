@@ -106,11 +106,10 @@ local function file_header(relname, is_first)
   return lines
 end
 
--- Divider shown between two non-adjacent blocks of the same file (a gap of
--- `gap` hidden source lines).
-local function block_divider(gap)
-  local label = gap > 0 and string.format('   ⋮ %d lines', gap) or '   ⋮'
-  return { { { label, 'ExcerptsSeparator' } } }
+-- Divider shown between two non-adjacent blocks of the same file: a dim `⋮` in
+-- the line-number gutter. The jump in line numbers already shows the gap's size.
+local function block_divider()
+  return { { { '   ⋮', 'ExcerptsSeparator' } } }
 end
 
 local function open_window(buf)
@@ -256,8 +255,6 @@ local function build_infos(st)
   for fi, f in ipairs(st.view.files) do
     local blocks = model.materialize(f, f.levels)
     for bi, block in ipairs(blocks) do
-      local prev = blocks[bi - 1]
-      local gap = prev and (block.lines[1].lnum - prev.lines[#prev.lines].lnum - 1) or 0
       for li, line in ipairs(block.lines) do
         local row = #lines
         lines[#lines + 1] = line.source
@@ -275,7 +272,6 @@ local function build_infos(st)
           first_in_file = (bi == 1 and li == 1),
           is_first_file = (fi == 1),
           block_divider = (bi > 1 and li == 1),
-          gap = gap,
         }
       end
     end
@@ -408,7 +404,7 @@ local function decorate(buf, st, rows)
       elseif info.block_divider then
         vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
           right_gravity = false,
-          virt_lines = block_divider(info.gap),
+          virt_lines = block_divider(),
           virt_lines_above = true,
         })
       end

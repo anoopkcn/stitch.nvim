@@ -152,7 +152,8 @@ Layout:
   • Match lines carry a brighter line number than surrounding context lines.
   • The matched span(s) are underlined on top of syntax highlighting.
   • Diagnostic (or other quickfix) messages appear as a trailing annotation.
-  • When context hides part of a file, a `⋮ N lines` divider marks the gap.
+  • When context hides part of a file, a `⋮` divider marks the gap (the jump
+    in line numbers shows its size).
 
 Each real line maps 1:1 to one source line. There is one excerpt per source
 line even if a line has several matches — their spans are all underlined.
@@ -261,8 +262,8 @@ jumpable, and highlighted just like a match — so `context` is also a quick
 way to edit a few lines around each hit without leaving the view.
 
 Within a file, overlapping or adjacent context blocks are merged into one,
-and a gap between two blocks of the same file is shown as a `⋮ N lines`
-divider.
+and a gap between two blocks of the same file is shown as a `⋮` divider (the
+jump in line numbers indicates how many lines it spans).
 
 Interactive expand/collapse~
 
