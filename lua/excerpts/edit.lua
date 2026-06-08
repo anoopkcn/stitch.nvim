@@ -2,11 +2,12 @@
 -- paint time and apply the changes to the real source files.
 --
 -- The excerpts buffer is plain text edited with any native command — `gcc`,
--- `dd`, `J`, `o`, paste, multi-line changes. On save we diff `st.snapshot` (the
--- source text as painted) against the current buffer, map each diff hunk's
--- snapshot region back to a contiguous source range via `st.origin`, and rewrite
--- that range with `nvim_buf_set_lines`. There is no command-specific handling:
--- the diff reconciles whatever state the buffer ends up in.
+-- `dd`, `J`, `o`, paste, multi-line changes. On save we take the buffer↔baseline
+-- diff from `render.reconcile` (the same single diff the display uses; see
+-- reconcile.lua), map each hunk's snapshot region back to a contiguous source
+-- range via the painted origin, and rewrite that range with `nvim_buf_set_lines`.
+-- There is no command-specific handling: the diff reconciles whatever state the
+-- buffer ends up in.
 --
 -- A source line that changed underneath us since paint is never clobbered: the
 -- hunk is flagged inline and skipped. A hunk that can't be mapped to a single
@@ -190,17 +191,19 @@ function M.save(buf)
   end
   vim.api.nvim_buf_clear_namespace(buf, warn_ns, 0, -1)
 
-  local current = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  local hunks = vim.diff(
-    table.concat(st.snapshot, '\n') .. '\n',
-    table.concat(current, '\n') .. '\n',
-    { result_type = 'indices' }
-  )
+  -- One diff of the buffer against the painted baseline, shared with the display
+  -- (see render.reconcile / reconcile.compute). `current` is the exact text the
+  -- hunks were diffed from.
+  local R = render.reconcile(buf)
+  if not R then
+    return
+  end
+  local current, hunks, origin = R.current, R.hunks, R.origin
 
   -- Group mappable hunks by source file; flag the rest.
   local by_file, order, unmappable = {}, {}, 0
   for _, h in ipairs(hunks) do
-    local plans, brow = plan_hunk(h, st.origin, current, buf)
+    local plans, brow = plan_hunk(h, origin, current, buf)
     if #plans == 0 then
       unmappable = unmappable + 1
       flag(buf, brow, 'cannot map edit (spans files/blocks) — not written')
@@ -282,12 +285,7 @@ function M.save(buf)
     -- Pure in-place save: the buffer already shows the final text and line
     -- numbers are unchanged, so skip the relayout (and keep the undo history,
     -- like a normal `:w`). Just advance the diff baseline to what we wrote.
-    for i, o in pairs(st.origin) do
-      if o and o.lnum then
-        o.source = current[i]
-      end
-    end
-    st.snapshot = current
+    render.rebase_inplace(buf, current)
     vim.bo[buf].modified = false
   else
     -- Keep the user's edits (including un-written ones) and the inline flags so

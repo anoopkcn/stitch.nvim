@@ -9,6 +9,7 @@
 -- jump-to-source, and expand/collapse all rely on.
 local config = require('excerpts.config')
 local model = require('excerpts.model')
+local reconcile = require('excerpts.reconcile')
 
 local M = {}
 
@@ -466,46 +467,66 @@ local function paint(buf, st)
   vim.bo[buf].modified = false
 end
 
---- Map current buffer rows to their painted source info by diffing the buffer
---- against the snapshot. Returns an array where map[r+1] is the info for buffer
---- row r, or false for the spacer / a line the user inserted. Cached per
---- changedtick. This is what keeps numbers + syntax correct mid-edit: an inserted
---- line reads as an insertion, so the lines around it keep their source identity.
-function M.live_map(buf)
+--- Build (or reuse) the complete cached reconciliation of `buf` against the
+--- painted baseline: { tick, map, hunks, current }. Both M.live_map and
+--- M.reconcile go through this, so the cached entry is never partial and a `:w`
+--- landing on the same changedtick a redraw already filled reuses the one entry.
+--- Recomputed on a changedtick miss; cleared by paint and rebase_inplace.
+--- Returns nil before the first paint.
+local function live_entry(buf)
   local st = M.state[buf]
   if not st or not st.snapshot then
     return nil
   end
   local tick = vim.api.nvim_buf_get_changedtick(buf)
   if st.live and st.live.tick == tick then
-    return st.live.map
+    return st.live
   end
   local current = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  local map = {}
-  local hunks = vim.diff(
-    table.concat(st.snapshot, '\n') .. '\n',
-    table.concat(current, '\n') .. '\n',
-    { result_type = 'indices' }
-  )
-  local si, ci = 1, 1 -- 1-based snapshot / current positions
-  for _, h in ipairs(hunks) do
-    local sa, ca, sb, cb = h[1], h[2], h[3], h[4]
-    while ci < sb do -- identical region before the hunk; si and ci move together
-      map[ci] = st.origin[si] or false
-      si, ci = si + 1, ci + 1
-    end
-    for k = 0, cb - 1 do -- changed region: top-align new rows with the old ones
-      map[sb + k] = (k < ca and st.origin[si + k]) or false
-    end
-    -- The loop left si at the changed region's start; consume its ca old rows.
-    si, ci = si + ca, sb + cb
+  local r = reconcile.compute(st.snapshot, current, st.origin)
+  st.live = { tick = tick, map = r.map, hunks = r.hunks, current = current }
+  return st.live
+end
+
+--- Map current buffer rows to their painted source info: an array where
+--- map[r+1] is the info for buffer row r, or false for the spacer / a line the
+--- user inserted. Cached per changedtick. This is what keeps numbers + syntax
+--- correct mid-edit: an inserted line reads as an insertion, so the lines around
+--- it keep their source identity.
+function M.live_map(buf)
+  local e = live_entry(buf)
+  return e and e.map or nil
+end
+
+--- The full reconciliation of the current buffer against the painted baseline,
+--- for write-back: { map, hunks, current, origin }. `current` is the exact text
+--- the hunks were diffed from (cached, not re-read), so the editor applies the
+--- same text the display is showing.
+function M.reconcile(buf)
+  local e = live_entry(buf)
+  if not e then
+    return nil
   end
-  while ci <= #current do -- identical tail
-    map[ci] = st.origin[si] or false
-    si, ci = si + 1, ci + 1
+  return { map = e.map, hunks = e.hunks, current = e.current, origin = M.state[buf].origin }
+end
+
+--- Advance the diff baseline to `current` after a pure in-place clean save,
+--- without re-laying-out (so undo survives, like a normal :w). `current` is the
+--- exact text written back. Must drop st.live: no buffer edit happened, so
+--- changedtick is unchanged and a stale cached diff would otherwise re-apply the
+--- same edits on the next :w.
+function M.rebase_inplace(buf, current)
+  local st = M.state[buf]
+  if not st then
+    return
   end
-  st.live = { tick = tick, map = map }
-  return map
+  for i, o in pairs(st.origin) do
+    if o and o.lnum then
+      o.source = current[i]
+    end
+  end
+  st.snapshot = current
+  st.live = nil
 end
 
 --- Re-place the gutter and decorations for the current (edited) buffer so
