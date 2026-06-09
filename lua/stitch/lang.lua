@@ -1,8 +1,8 @@
 -- Source-file language facets, resolved from a filename and cached.
 --
--- The excerpts buffer text is pure source, so its filetype is `excerpts` — it
+-- The stitch buffer text is pure source, so its filetype is `stitch` — it
 -- tells neither native `gc` which comment syntax to use nor the highlighter which
--- Treesitter grammar to parse with. Both are derived from each excerpt's *source*
+-- Treesitter grammar to parse with. Both are derived from each stitch's *source*
 -- filename instead. This is the single place that maps a filename to a filetype
 -- (`vim.filetype.match`); the commentstring and the Treesitter language are
 -- derived from that filetype.

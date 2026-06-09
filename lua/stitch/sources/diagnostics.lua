@@ -5,7 +5,7 @@ local M = {}
 function M.run(present)
   local items = vim.diagnostic.toqflist(vim.diagnostic.get(nil))
   if vim.tbl_isempty(items) then
-    vim.notify('excerpts: no diagnostics', vim.log.levels.WARN)
+    vim.notify('stitches: no diagnostics', vim.log.levels.WARN)
     return
   end
   present(items, 'Diagnostics')

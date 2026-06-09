@@ -1,8 +1,8 @@
--- Jump from an excerpt line in the excerpts view to its source location.
+-- Jump from a stitch line in the stitch view to its source location.
 local M = {}
 
 -- Pick a window to open the source file in: any non-floating window in the
--- current tab that isn't the excerpts window. If none, split off one.
+-- current tab that isn't the stitch window. If none, split off one.
 local function pick_target(mbwin)
   for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     if w ~= mbwin and vim.api.nvim_win_get_config(w).relative == '' then
@@ -16,9 +16,9 @@ end
 function M.jump(buf)
   local mbwin = vim.api.nvim_get_current_win()
   local row = vim.api.nvim_win_get_cursor(mbwin)[1] - 1
-  local rec = require('excerpts.render').record_at(buf, row)
+  local rec = require('stitch.render').record_at(buf, row)
   if not rec then
-    vim.notify('excerpts: no source for this line', vim.log.levels.WARN)
+    vim.notify('stitches: no source for this line', vim.log.levels.WARN)
     return
   end
 

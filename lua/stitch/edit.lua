@@ -1,7 +1,7 @@
 -- Write-back: on `:w`, diff the edited buffer against the snapshot taken at
 -- paint time and apply the changes to the real source files.
 --
--- The excerpts buffer is plain text edited with any native command — `gcc`,
+-- The stitch buffer is plain text edited with any native command — `gcc`,
 -- `dd`, `J`, `o`, paste, multi-line changes. On save we take the buffer↔baseline
 -- diff from `render.reconcile` (the same single diff the display uses; see
 -- reconcile.lua), map each hunk's snapshot region back to a contiguous source
@@ -13,16 +13,16 @@
 -- hunk is flagged inline and skipped. A hunk that can't be mapped to a single
 -- contiguous source range (it spans files or non-adjacent blocks) is likewise
 -- skipped.
-local render = require('excerpts.render')
-local model = require('excerpts.model')
-local intent = require('excerpts.intent')
+local render = require('stitch.render')
+local model = require('stitch.model')
+local intent = require('stitch.intent')
 
 local M = {}
 
 -- Inline warnings for skipped hunks; cleared and rebuilt on every save.
-local warn_ns = vim.api.nvim_create_namespace('excerpts_warn')
+local warn_ns = vim.api.nvim_create_namespace('stitch_warn')
 
-vim.api.nvim_set_hl(0, 'ExcerptsDivergent', { link = 'WarningMsg', default = true })
+vim.api.nvim_set_hl(0, 'StitchDivergent', { link = 'WarningMsg', default = true })
 
 -- Load (without focusing) the buffer backing `filename`. set_lines needs a
 -- loaded buffer; loading also reads the current on-disk state so the divergence
@@ -45,7 +45,7 @@ local function flag(buf, row, message)
   end
   row = math.max(0, math.min(row, vim.api.nvim_buf_line_count(buf) - 1))
   vim.api.nvim_buf_set_extmark(buf, warn_ns, row, 0, {
-    virt_text = { { '  ‹ ' .. message .. ' ›', 'ExcerptsDivergent' } },
+    virt_text = { { '  ‹ ' .. message .. ' ›', 'StitchDivergent' } },
     virt_text_pos = 'eol',
   })
 end
@@ -184,7 +184,7 @@ local function source_intact(sbuf, plan)
   return true
 end
 
---- Handle `:w` on an excerpts view.
+--- Handle `:w` on a stitch view.
 function M.save(buf)
   local st = render.state[buf]
   if not st or not st.snapshot then
@@ -296,9 +296,9 @@ function M.save(buf)
 
   local msg
   if edits_applied == 0 and clean then
-    msg = 'excerpts: no changes to write'
+    msg = 'stitches: no changes to write'
   else
-    msg = string.format('excerpts: wrote %d edit(s) in %d file(s)', edits_applied, files_written)
+    msg = string.format('stitches: wrote %d edit(s) in %d file(s)', edits_applied, files_written)
   end
   local level = vim.log.levels.INFO
   local notes = {}

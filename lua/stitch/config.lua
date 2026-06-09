@@ -1,28 +1,28 @@
--- User-facing configuration for excerpts.nvim
+-- User-facing configuration for stitch.nvim
 local M = {}
 
 M.defaults = {
-  -- Where to open the excerpts view.
+  -- Where to open the stitch view.
   -- 'split' | 'vsplit' | 'tab' | 'current'
   window = 'split',
 
-  -- Project Treesitter syntax highlighting from each source onto the excerpts.
+  -- Project Treesitter syntax highlighting from each source onto the stitches.
   highlight = true,
 
   -- Lines of surrounding source context to show above and below each match.
-  -- 0 = just the match line. Context lines are editable like any excerpt.
+  -- 0 = just the match line. Context lines are editable like any stitch.
   context = 0,
 
   -- Lines added/removed per expand/collapse keypress (a count overrides it,
   -- e.g. `10+` adds 10 lines).
   context_step = 4,
 
-  -- Buffer-local keymaps inside the excerpts view.
+  -- Buffer-local keymaps inside the stitch view.
   keys = {
     jump = '<CR>', -- open the source file at the line under the cursor
-    close = 'q', -- close the excerpts view
-    expand = '+', -- show more context around the excerpt under the cursor
-    collapse = '-', -- show less context around the excerpt under the cursor
+    close = 'q', -- close the stitch view
+    expand = '+', -- show more context around the stitch under the cursor
+    collapse = '-', -- show less context around the stitch under the cursor
   },
 }
 

@@ -7,7 +7,7 @@ function M.run(present)
   local bufnr = vim.api.nvim_get_current_buf()
   local clients = vim.lsp.get_clients({ bufnr = bufnr, method = 'textDocument/references' })
   if #clients == 0 then
-    vim.notify('excerpts: no LSP client supports references here', vim.log.levels.WARN)
+    vim.notify('stitches: no LSP client supports references here', vim.log.levels.WARN)
     return
   end
 
@@ -23,7 +23,7 @@ function M.run(present)
       end
     end
     if #locations == 0 then
-      vim.notify('excerpts: no references found', vim.log.levels.WARN)
+      vim.notify('stitches: no references found', vim.log.levels.WARN)
       return
     end
     local items = vim.lsp.util.locations_to_items(locations, encoding)

@@ -169,7 +169,7 @@ function M.from_items(items, title)
           by_file[fname] = f
           order[#order + 1] = fname
         end
-        if not f.matches[lnum] then -- one excerpt per source line
+        if not f.matches[lnum] then -- one stitch per source line
           f.matches[lnum] = { col = it.col or 1, qftext = it.text or '', spans = {} }
           f.match_lnums[#f.match_lnums + 1] = lnum
         end
@@ -195,7 +195,7 @@ function M.from_items(items, title)
     end
   end
 
-  return { title = title or 'Excerpts', files = files }
+  return { title = title or 'Stitch', files = files }
 end
 
 return M

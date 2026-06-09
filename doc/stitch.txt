@@ -1,47 +1,47 @@
-*excerpts.txt*  View and edit excerpts from many files in a single buffer
+*stitch.txt*  View and edit stitches from many files in a single buffer
 
 Author:  @anoopkcn <https://github.com/anoopkcn>
 License: MIT
 
 ==============================================================================
-CONTENTS                                                  *excerpts-contents*
+CONTENTS                                                  *stitch-contents*
 
-1. Introduction ............................ |excerpts-introduction|
-2. Requirements ............................ |excerpts-requirements|
-3. Quick Start ............................. |excerpts-quickstart|
-4. Commands ................................ |excerpts-commands|
-    4.1 :Excerpts grep ..................... |:Excerpts-grep|
-    4.2 :Excerpts references ............... |:Excerpts-references|
-    4.3 :Excerpts diagnostics .............. |:Excerpts-diagnostics|
-    4.4 :Excerpts qf ....................... |:Excerpts-qf|
-5. The View ................................ |excerpts-view|
-6. Mappings ................................ |excerpts-mappings|
-7. Editing & Write-back .................... |excerpts-editing|
-8. Bulk Edits .............................. |excerpts-bulk-edits|
-9. Context Lines ........................... |excerpts-context-lines|
-10. Highlighting ........................... |excerpts-highlighting|
-11. Configuration .......................... |excerpts-configuration|
-12. Highlight Groups ....................... |excerpts-highlight-groups|
-13. Functions .............................. |excerpts-functions|
-14. Not in Scope ........................... |excerpts-not-in-scope|
+1. Introduction ............................ |stitch-introduction|
+2. Requirements ............................ |stitch-requirements|
+3. Quick Start ............................. |stitch-quickstart|
+4. Commands ................................ |stitch-commands|
+    4.1 :Stitch grep ..................... |:Stitch-grep|
+    4.2 :Stitch references ............... |:Stitch-references|
+    4.3 :Stitch diagnostics .............. |:Stitch-diagnostics|
+    4.4 :Stitch qf ....................... |:Stitch-qf|
+5. The View ................................ |stitch-view|
+6. Mappings ................................ |stitch-mappings|
+7. Editing & Write-back .................... |stitch-editing|
+8. Bulk Edits .............................. |stitch-bulk-edits|
+9. Context Lines ........................... |stitch-context-lines|
+10. Highlighting ........................... |stitch-highlighting|
+11. Configuration .......................... |stitch-configuration|
+12. Highlight Groups ....................... |stitch-highlight-groups|
+13. Functions .............................. |stitch-functions|
+14. Not in Scope ........................... |stitch-not-in-scope|
 
 ==============================================================================
-1. INTRODUCTION                                      *excerpts* *excerpts-introduction*
+1. INTRODUCTION                                      *stitch* *stitch-introduction*
 
-Excerpts gathers lines from many files into a single, grouped, editable
+Stitch gathers lines from many files into a single, grouped, editable
 buffer — Neovim's take on Zed's multibuffers
 <https://zed.dev/docs/multibuffers>.
 
 Populate one view from a project search, LSP references, diagnostics, or the
 current quickfix list, read it top-to-bottom, jump straight to any source
-line, and edit excerpt lines in place — `:w` writes every change back to its
+line, and edit stitch lines in place — `:w` writes every change back to its
 source file at once.
 
 Highlights:
   • Sources: project grep, LSP references, diagnostics, git/jj diff, quickfix
   • Quickfix-backed, so |:cdo| / |:cfdo| bulk edits work on the same set
   • Strict 1:1 editing with a source-divergence guard (never clobbers)
-  • Per-excerpt source context with interactive expand/collapse
+  • Per-stitch source context with interactive expand/collapse
   • Cross-file Treesitter syntax highlighting (each line in its own language)
   • Jump back to any source location with a single key
 
@@ -52,7 +52,7 @@ Use cases:
   • Turn a quickfix list into a readable, editable working set
 
 ==============================================================================
-2. REQUIREMENTS                                      *excerpts-requirements*
+2. REQUIREMENTS                                      *stitch-requirements*
 
   • Neovim 0.11+ (developed against 0.12.x)
   • ripgrep <https://github.com/BurntSushi/ripgrep> (`rg`) on $PATH, for the
@@ -60,83 +60,83 @@ Use cases:
     external tools.
 
 ==============================================================================
-3. QUICK START                                        *excerpts-quickstart*
+3. QUICK START                                        *stitch-quickstart*
 
-Excerpts works out of the box. The |:Excerpts| command is registered at
-startup by plugin/excerpts.lua, so |excerpts.setup()| is optional — call it
+Stitch works out of the box. The |:Stitch| command is registered at
+startup by plugin/stitch.lua, so |stitch.setup()| is optional — call it
 only to override defaults.
 
 With lazy.nvim: >
     {
-      'excerpts.nvim',
-      opts = {}, -- calls require('excerpts').setup()
+      'stitch.nvim',
+      opts = {}, -- calls require('stitch').setup()
     }
 <
 Try it: >
-    :Excerpts grep TODO          " every TODO in the project
-    :Excerpts references         " every reference to the symbol under cursor
-    :Excerpts diagnostics        " every project diagnostic
+    :Stitch grep TODO          " every TODO in the project
+    :Stitch references         " every reference to the symbol under cursor
+    :Stitch diagnostics        " every project diagnostic
 <
 Inside the view: read down the buffer, press <CR> on any line to open its
 source, edit lines in place and `:w` to save them back, or `q` to close.
 
 ==============================================================================
-4. COMMANDS                                              *excerpts-commands*
+4. COMMANDS                                              *stitch-commands*
 
 All sources are reached through a single command with a subcommand: >
-    :Excerpts {grep|references|diagnostics|diff|qf} [args]
+    :Stitch {grep|references|diagnostics|diff|qf} [args]
 <
-                                                                  *:Excerpts*
+                                                                  *:Stitch*
 Tab-completion completes the subcommand name in the first argument position.
 Each source funnels through the quickfix list (kept in sync so |:cdo| /
-|:cfdo| operate on the same set) and then renders the excerpts view on top.
+|:cfdo| operate on the same set) and then renders the stitch view on top.
 If a source produces no results, a notification is shown and no view opens.
 
 ------------------------------------------------------------------------------
-4.1 :Excerpts grep                                          *:Excerpts-grep*
+4.1 :Stitch grep                                          *:Stitch-grep*
 
 Open a view from a project-wide ripgrep search. >
-    :Excerpts grep {pattern}
+    :Stitch grep {pattern}
 <
 The remaining arguments are joined with spaces and passed to ripgrep as the
 search pattern. If no pattern is given, you are prompted for one.
 
-One excerpt is created per matched line; the exact matched span(s) on each
-line are underlined (see |ExcerptsMatch|). Requires `rg` on $PATH.
+One stitch is created per matched line; the exact matched span(s) on each
+line are underlined (see |StitchMatch|). Requires `rg` on $PATH.
 
 Examples: >
-    :Excerpts grep TODO
-    :Excerpts grep function foo
-    :Excerpts grep \bstruct\s+\w+
+    :Stitch grep TODO
+    :Stitch grep function foo
+    :Stitch grep \bstruct\s+\w+
 <
 ------------------------------------------------------------------------------
-4.2 :Excerpts references                              *:Excerpts-references*
+4.2 :Stitch references                              *:Stitch-references*
 
 Open a view of all references to the symbol under the cursor. >
-    :Excerpts references
+    :Stitch references
 <
 Queries every attached LSP client that supports `textDocument/references`
 (with `includeDeclaration = true`) and aggregates the locations. Requires a
 language server attached to the current buffer.
 
 ------------------------------------------------------------------------------
-4.3 :Excerpts diagnostics                            *:Excerpts-diagnostics*
+4.3 :Stitch diagnostics                            *:Stitch-diagnostics*
 
 Open a view of all project diagnostics. >
-    :Excerpts diagnostics
+    :Stitch diagnostics
 <
 Collects every diagnostic from |vim.diagnostic.get()| across all buffers. Each
-excerpt shows the offending source line; the diagnostic message is shown as a
-trailing annotation (see |ExcerptsAnnotation|).
+stitch shows the offending source line; the diagnostic message is shown as a
+trailing annotation (see |StitchAnnotation|).
 
 ------------------------------------------------------------------------------
-4.4 :Excerpts diff                                          *:Excerpts-diff*
+4.4 :Stitch diff                                          *:Stitch-diff*
 
 Open a view of working-tree changes. >
-    :Excerpts diff [revspec]
+    :Stitch diff [revspec]
 <
 Runs the version control system's diff and shows every added or modified line
-as an excerpt, grouped by file and editable like any other view (`:w` writes
+as a stitch, grouped by file and editable like any other view (`:w` writes
 your changes back). Both git and jujutsu are supported — they emit the same
 git-format diff — and the VCS is auto-detected (a `.jj` directory means jj,
 otherwise git).
@@ -144,31 +144,31 @@ otherwise git).
 With no argument it shows your current uncommitted changes (`git diff HEAD` /
 `jj diff`). With a `revspec` it shows everything changed from that revision to
 the working copy (`git diff {revspec}` / `jj diff --from {revspec}`): >
-    :Excerpts diff main      " everything on this branch vs main
-    :Excerpts diff @--        " (jj) changes since the grandparent
+    :Stitch diff main      " everything on this branch vs main
+    :Stitch diff @--        " (jj) changes since the grandparent
 <
 Note: only added and modified lines appear. The view shows current-file
 content, so a change that *only removes* lines has nothing to display.
 
 ------------------------------------------------------------------------------
-4.5 :Excerpts qf                                              *:Excerpts-qf*
+4.5 :Stitch qf                                              *:Stitch-qf*
 
 Build a view from the current quickfix list. >
-    :Excerpts qf
+    :Stitch qf
 <
 Uses the quickfix list exactly as it stands — populate it however you like
-(|:grep|, |:vimgrep|, |:cexpr|, another plugin) and turn it into an excerpts
+(|:grep|, |:vimgrep|, |:cexpr|, another plugin) and turn it into a stitch
 view. Unlike the other sources, this does not replace the quickfix list. If
 the list is empty, a notification is shown.
 
 ==============================================================================
-5. THE VIEW                                                  *excerpts-view*
+5. THE VIEW                                                  *stitch-view*
 
-The view is a dedicated, editable scratch buffer (filetype `excerpts`,
-buftype `acwrite`). It is opened where |excerpts-window| says.
+The view is a dedicated, editable scratch buffer (filetype `stitch`,
+buftype `acwrite`). It is opened where |stitch-window| says.
 
 Layout:
-  • Excerpts are grouped by file under a `{relative path}` header bar.
+  • Stitches are grouped by file under a `{relative path}` header bar.
   • Each line shows its source line number inline on the left.
   • Match lines carry a brighter line number than surrounding context lines.
   • The matched span(s) are underlined on top of syntax highlighting.
@@ -176,41 +176,41 @@ Layout:
   • When context hides part of a file, a `⋮` divider marks the gap (the jump
     in line numbers shows its size).
 
-Each real line maps 1:1 to one source line. There is one excerpt per source
+Each real line maps 1:1 to one source line. There is one stitch per source
 line even if a line has several matches — their spans are all underlined.
 Files that cannot be read (or are empty) are skipped.
 
 ==============================================================================
-6. MAPPINGS                                              *excerpts-mappings*
+6. MAPPINGS                                              *stitch-mappings*
 
 These buffer-local mappings are active inside the view. The keys are
-configurable via |excerpts-keys|; set one to a false-y value to disable it.
+configurable via |stitch-keys|; set one to a false-y value to disable it.
 
-                                                            *excerpts_<CR>*
+                                                            *stitch_<CR>*
 <CR>        Open the source file of the line under the cursor, at its line and
             column. Reuses an existing window in the tab if there is one,
             otherwise opens a vertical split.
 
-                                                              *excerpts_q*
+                                                              *stitch_q*
 q           Close the view (closes the window, or deletes the buffer if it is
             the last window in the tab).
 
-                                                              *excerpts_+*
-+           Expand: show more context around the excerpt under the cursor.
-            Adds |excerpts-context-step| lines, or a count: `10+` adds 10.
+                                                              *stitch_+*
++           Expand: show more context around the stitch under the cursor.
+            Adds |stitch-context-step| lines, or a count: `10+` adds 10.
 
-                                                              *excerpts_-*
--           Collapse: show less context around the excerpt under the cursor
+                                                              *stitch_-*
+-           Collapse: show less context around the stitch under the cursor
             (floor of 0). Count-aware, like `+`.
 
 The view does not remap editing keys: `gc`/`gcc`, `dd`, `J`, `o`, `p` and the
-rest are stock Neovim. See |excerpts-editing| for how those edits are written
-back, and the |excerpts-editing| "Commenting" note for `gc` language handling.
+rest are stock Neovim. See |stitch-editing| for how those edits are written
+back, and the |stitch-editing| "Commenting" note for `gc` language handling.
 
-See |excerpts-context-lines| for how expand/collapse behave.
+See |stitch-context-lines| for how expand/collapse behave.
 
 ==============================================================================
-7. EDITING & WRITE-BACK                                   *excerpts-editing*
+7. EDITING & WRITE-BACK                                   *stitch-editing*
 
 Edit the buffer with any native command — change text, `dd`, `J`, `o`, paste,
 split a line into several, `gcc` to comment — then `:w`. Changes are written
@@ -228,7 +228,7 @@ Two guarantees bound what is written:
 
   • If a source line changed underneath you since the view opened, that edit is
     flagged inline with `‹ source changed — not written ›`
-    (see |ExcerptsDivergent|) and skipped — never clobbered.
+    (see |StitchDivergent|) and skipped — never clobbered.
   • A hunk that cannot be mapped to a single source range — it spans two files,
     or a structural change straddles a block boundary — is flagged
     `‹ cannot map edit (spans files/blocks) — not written ›` and skipped rather
@@ -239,12 +239,12 @@ with skips keeps the buffer and its inline flags so you can resolve the conflict
 and save again.
 
 After `:w` a summary is shown, e.g.: >
-    excerpts: wrote 3 edit(s) in 2 file(s)
+    stitches: wrote 3 edit(s) in 2 file(s)
 <
 with any skipped counts appended.
 
 Note: write-back goes through each source buffer and writes it, so saving the
-excerpts buffer behaves like saving those files directly — it also persists
+stitch buffer behaves like saving those files directly — it also persists
 any other unsaved changes in them and triggers their |BufWritePre| /
 |BufWritePost| autocommands. If you use format-on-save, every touched file is
 formatted on `:w`.
@@ -253,31 +253,31 @@ Commenting~
 
 `gc`/`gcc` are stock Neovim commenting. Because the view aggregates many files,
 'commentstring' is kept in sync with the source file under the cursor, so
-commenting uses each excerpt's own language (Lua with `--`, Python with `#`,
+commenting uses each stitch's own language (Lua with `--`, Python with `#`,
 ...). A single-line or single-file comment is exact. A multi-line `gc` spanning
 *different* languages uses the cursor line's syntax — Neovim's built-in
 commenting resolves one 'commentstring' per invocation, a limitation no buffer
 setting can lift.
 
 ==============================================================================
-8. BULK EDITS                                          *excerpts-bulk-edits*
+8. BULK EDITS                                          *stitch-bulk-edits*
 
 The view is backed by the quickfix list, so Neovim's built-in cross-file edit
 commands operate on the same set with no extra plugin code: >
-    :cdo s/old/new/ | update     " substitute across every excerpt's line
+    :cdo s/old/new/ | update     " substitute across every stitch's line
     :cfdo %s/old/new/g | update   " substitute across every file in the list
 <
-This complements in-view editing: edit excerpts directly for hand changes
+This complements in-view editing: edit stitches directly for hand changes
 (including deletion, insertion, and multi-line edits), or use `:cdo`/`:cfdo` for
 a uniform substitution across every entry in one pass.
 
 Note: the grep, references, and diagnostics sources replace the quickfix list
-when they run; the |:Excerpts-qf| source reads it without replacing it.
+when they run; the |:Stitch-qf| source reads it without replacing it.
 
 ==============================================================================
-9. CONTEXT LINES                                     *excerpts-context-lines*
+9. CONTEXT LINES                                     *stitch-context-lines*
 
-Set |excerpts-context| to N to show N source lines above and below every
+Set |stitch-context| to N to show N source lines above and below every
 match. Context lines are dimmer than match lines but are fully editable,
 jumpable, and highlighted just like a match — so `context` is also a quick
 way to edit a few lines around each hit without leaving the view.
@@ -288,47 +288,47 @@ jump in line numbers indicates how many lines it spans).
 
 Interactive expand/collapse~
 
-Press `+` / `-` (see |excerpts-mappings|) to grow or shrink the context around
-the excerpt under the cursor by |excerpts-context-step| lines, or a count:
+Press `+` / `-` (see |stitch-mappings|) to grow or shrink the context around
+the stitch under the cursor by |stitch-context-step| lines, or a count:
 `10+`. Expanding raises the context level of every match in the block under
-the cursor; expanding far enough merges neighbouring excerpts, and collapsing
+the cursor; expanding far enough merges neighbouring stitches, and collapsing
 splits them back.
 
 Because expand/collapse re-lays-out the anchored lines, it resets the buffer's
 undo history:
-  • Pending edits to existing excerpt lines are preserved (and still save).
+  • Pending edits to existing stitch lines are preserved (and still save).
   • You cannot `u` across an expand/collapse.
   • Brand-new lines you typed into the view (which are not anchored to a
     source line and would not be written by `:w` anyway) are dropped.
 
 ==============================================================================
-10. HIGHLIGHTING                                     *excerpts-highlighting*
+10. HIGHLIGHTING                                     *stitch-highlighting*
 
 Syntax highlighting~
 
-Each excerpt is syntax-highlighted with its *source file's* Treesitter
+Each stitch is syntax-highlighted with its *source file's* Treesitter
 grammar, so a view mixing Lua, Python, and Markdown shows each line in the
 right colours. Each contiguous block is parsed in its own language (the grammar
-is derived from the filename — no LSP is started just to colour an excerpt), so
+is derived from the filename — no LSP is started just to colour a stitch), so
 edited and newly-inserted lines are highlighted live from the buffer's own
 text. Files whose language has no Treesitter parser render uncoloured. Disable
-with |excerpts-highlight| = `false`.
+with |stitch-highlight| = `false`.
 
 Match highlighting~
 
 The matched text itself is marked on top of syntax with a blue underline
-(|ExcerptsMatch|):
+(|StitchMatch|):
   • grep: the exact search span(s) reported by `rg --json`.
   • references / diagnostics: the symbol or diagnostic range (single-line
     ranges only).
 
 ==============================================================================
-11. CONFIGURATION                                  *excerpts-configuration*
+11. CONFIGURATION                                  *stitch-configuration*
 
-Pass options to |excerpts.setup()| (or to lazy.nvim's `opts`). Defaults: >
-    require('excerpts').setup({
+Pass options to |stitch.setup()| (or to lazy.nvim's `opts`). Defaults: >
+    require('stitch').setup({
       window = 'split',   -- 'split' | 'vsplit' | 'tab' | 'current'
-      highlight = true,   -- project Treesitter highlighting onto excerpts
+      highlight = true,   -- project Treesitter highlighting onto stitches
       context = 0,        -- source context lines above/below each match
       context_step = 4,   -- lines added/removed per +/- press
       keys = {
@@ -340,39 +340,39 @@ Pass options to |excerpts.setup()| (or to lazy.nvim's `opts`). Defaults: >
     })
 <
 ------------------------------------------------------------------------------
-                                                          *excerpts-window*
+                                                          *stitch-window*
 window~
     Type: string
     Default: "split"
 
-Where to open the excerpts view. One of:
+Where to open the stitch view. One of:
     "split"     horizontal split below (botright)
     "vsplit"    vertical split on the right (botright)
     "tab"       a new tab page
     "current"   reuse the current window
 
 ------------------------------------------------------------------------------
-                                                       *excerpts-highlight*
+                                                       *stitch-highlight*
 highlight~
     Type: boolean
     Default: true
 
-Project each source file's Treesitter syntax highlighting onto its excerpt
-lines. Set to `false` to render excerpts uncoloured. Match-span underlining
-(|ExcerptsMatch|) is independent of this setting.
+Project each source file's Treesitter syntax highlighting onto its stitch
+lines. Set to `false` to render stitches uncoloured. Match-span underlining
+(|StitchMatch|) is independent of this setting.
 
 ------------------------------------------------------------------------------
-                                                         *excerpts-context*
+                                                         *stitch-context*
 context~
     Type: integer
     Default: 0
 
 Number of source lines to show above and below each match. 0 shows just the
 match line. Context lines are editable, jumpable, and highlighted like
-matches. See |excerpts-context-lines|.
+matches. See |stitch-context-lines|.
 
 ------------------------------------------------------------------------------
-                                                    *excerpts-context-step*
+                                                    *stitch-context-step*
 context_step~
     Type: integer
     Default: 4
@@ -381,14 +381,14 @@ Lines added or removed per `+` / `-` press. A count on the mapping overrides
 it for that press (e.g. `10+` adds 10 lines regardless of this value).
 
 ------------------------------------------------------------------------------
-                                                            *excerpts-keys*
+                                                            *stitch-keys*
 keys~
     Type: table
     Default: { jump = '<CR>', close = 'q', expand = '+', collapse = '-' }
 
-Buffer-local mappings inside the view. See |excerpts-mappings| for what each
+Buffer-local mappings inside the view. See |stitch-mappings| for what each
 does. Set a field to a false-y value to disable that mapping: >
-    require('excerpts').setup({
+    require('stitch').setup({
       keys = {
         jump = '<CR>',
         close = '<Esc>',   -- close with Esc instead of q
@@ -398,117 +398,117 @@ does. Set a field to a false-y value to disable that mapping: >
     })
 <
 ==============================================================================
-12. HIGHLIGHT GROUPS                             *excerpts-highlight-groups*
+12. HIGHLIGHT GROUPS                             *stitch-highlight-groups*
 
 All groups are defined with `default = true`, so any link you set before or
 after setup wins. Override them with |:highlight| (or `nvim_set_hl`).
 
-                                                        *ExcerptsHeaderBg*
-ExcerptsHeaderBg~
+                                                        *StitchHeaderBg*
+StitchHeaderBg~
     Background bar behind a file header. Default: the background of
     |hl-CursorLine| (falling back to |hl-Visual|). The header groups below are
     resolved with this background, and re-resolved on |ColorScheme|.
 
-                                                       *ExcerptsHeaderDir*
-ExcerptsHeaderDir~
+                                                       *StitchHeaderDir*
+StitchHeaderDir~
     The dimmed directory part of a file header. Default: |hl-Comment|
-    foreground on the |ExcerptsHeaderBg| background.
+    foreground on the |StitchHeaderBg| background.
 
-                                                      *ExcerptsHeaderName*
-ExcerptsHeaderName~
+                                                      *StitchHeaderName*
+StitchHeaderName~
     The bold file name in a file header. Default: |hl-Normal| foreground,
-    `bold`, on the |ExcerptsHeaderBg| background.
+    `bold`, on the |StitchHeaderBg| background.
 
-                                                            *ExcerptsLnum*
-ExcerptsLnum~
+                                                            *StitchLnum*
+StitchLnum~
     Inline source line number on a match line. Default: links to |hl-LineNr|.
 
-                                                     *ExcerptsContextLnum*
-ExcerptsContextLnum~
+                                                     *StitchContextLnum*
+StitchContextLnum~
     Inline source line number on a context line. Default: |hl-NonText|.
 
-                                                           *ExcerptsMatch*
-ExcerptsMatch~
+                                                           *StitchMatch*
+StitchMatch~
     The matched span on a line, drawn over syntax. Default: blue underline
     (`underline`, `sp = #61afef`).
 
-                                                      *ExcerptsAnnotation*
-ExcerptsAnnotation~
+                                                      *StitchAnnotation*
+StitchAnnotation~
     Trailing annotation (e.g. a diagnostic message). Default: |hl-Comment|.
 
-                                                       *ExcerptsSeparator*
-ExcerptsSeparator~
+                                                       *StitchSeparator*
+StitchSeparator~
     Block dividers and spacing between files. Default: |hl-NonText|.
 
-                                                       *ExcerptsDivergent*
-ExcerptsDivergent~
-    The inline `‹ source changed — not written ›` flag on a skipped excerpt.
+                                                       *StitchDivergent*
+StitchDivergent~
+    The inline `‹ source changed — not written ›` flag on a skipped stitch.
     Default: links to |hl-WarningMsg|.
 
 ==============================================================================
-13. FUNCTIONS                                          *excerpts-functions*
+13. FUNCTIONS                                          *stitch-functions*
 
 The module exposes a small Lua API. Each source function is equivalent to the
-matching |:Excerpts| subcommand.
+matching |:Stitch| subcommand.
 
 ------------------------------------------------------------------------------
-                                                         *excerpts.setup()*
-excerpts.setup({opts})
-    Optional. Override configuration defaults. The |:Excerpts| command is
+                                                         *stitch.setup()*
+stitch.setup({opts})
+    Optional. Override configuration defaults. The |:Stitch| command is
     registered at startup regardless, so the plugin works without calling
     this.
 
     Parameters: ~
-        {opts}  (table|nil) Options (see |excerpts-configuration|).
+        {opts}  (table|nil) Options (see |stitch-configuration|).
 
     Example: >
-        require('excerpts').setup({ window = 'vsplit', context = 2 })
+        require('stitch').setup({ window = 'vsplit', context = 2 })
 <
 ------------------------------------------------------------------------------
-                                                          *excerpts.grep()*
-excerpts.grep({pattern})
-    Open a view from a ripgrep search. Equivalent to |:Excerpts-grep|.
+                                                          *stitch.grep()*
+stitch.grep({pattern})
+    Open a view from a ripgrep search. Equivalent to |:Stitch-grep|.
 
     Parameters: ~
         {pattern}  (string|nil) Search pattern. Prompts if nil or empty.
 
     Example: >
-        require('excerpts').grep('TODO')
+        require('stitch').grep('TODO')
 <
 ------------------------------------------------------------------------------
-                                                    *excerpts.references()*
-excerpts.references()
+                                                    *stitch.references()*
+stitch.references()
     Open a view of all references to the symbol under the cursor. Equivalent
-    to |:Excerpts-references|.
+    to |:Stitch-references|.
 
     Example: >
-        require('excerpts').references()
+        require('stitch').references()
 <
 ------------------------------------------------------------------------------
-                                                   *excerpts.diagnostics()*
-excerpts.diagnostics()
+                                                   *stitch.diagnostics()*
+stitch.diagnostics()
     Open a view of all project diagnostics. Equivalent to
-    |:Excerpts-diagnostics|.
+    |:Stitch-diagnostics|.
 
     Example: >
-        require('excerpts').diagnostics()
+        require('stitch').diagnostics()
 <
 ------------------------------------------------------------------------------
-                                                    *excerpts.from_qflist()*
-excerpts.from_qflist()
-    Open a view from the current quickfix list. Equivalent to |:Excerpts-qf|.
+                                                    *stitch.from_qflist()*
+stitch.from_qflist()
+    Open a view from the current quickfix list. Equivalent to |:Stitch-qf|.
 
     Example: >
-        require('excerpts').from_qflist()
+        require('stitch').from_qflist()
 <
 ==============================================================================
-14. NOT IN SCOPE                                     *excerpts-not-in-scope*
+14. NOT IN SCOPE                                     *stitch-not-in-scope*
 
   • Multi-cursor editing across files. Zed's headline "wide refactor" mechanism
     has no Neovim equivalent and is intentionally not implemented — use
-    |excerpts-bulk-edits| (|:cdo| / |:cfdo|) over the quickfix list instead.
-  • Inserting or deleting lines *inside* an excerpt (structural in-view edits).
-    Edits are strictly 1:1; see |excerpts-editing|.
+    |stitch-bulk-edits| (|:cdo| / |:cfdo|) over the quickfix list instead.
+  • Inserting or deleting lines *inside* a stitch (structural in-view edits).
+    Edits are strictly 1:1; see |stitch-editing|.
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

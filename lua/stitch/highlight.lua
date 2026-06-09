@@ -1,4 +1,4 @@
--- Cross-file syntax highlighting via real Treesitter parsing of the excerpts
+-- Cross-file syntax highlighting via real Treesitter parsing of the stitches
 -- buffer itself.
 --
 -- Each maximal run of consecutive same-language rows (split at file headers and
@@ -12,14 +12,14 @@
 -- The parsers track buffer edits themselves (incremental re-parse on `parse()`),
 -- so in-place edits need no work here; only a structural change (line count
 -- changed, or a repaint) shifts the block ranges and re-applies the regions.
-local config = require('excerpts.config')
-local render = require('excerpts.render')
-local intent = require('excerpts.intent')
-local srclang = require('excerpts.lang')
+local config = require('stitch.config')
+local render = require('stitch.render')
+local intent = require('stitch.intent')
+local srclang = require('stitch.lang')
 
 local M = {}
 
-local hl_ns = vim.api.nvim_create_namespace('excerpts_highlight')
+local hl_ns = vim.api.nvim_create_namespace('stitch_highlight')
 
 -- Language of buffer row `row` (0-based) and whether it begins a new block.
 -- Existing rows take the language of their source file; an inserted line takes

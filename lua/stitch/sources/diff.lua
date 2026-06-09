@@ -1,6 +1,6 @@
--- VCS diff source: lists changed lines from the working tree as excerpts, so you
+-- VCS diff source: lists changed lines from the working tree as stitches, so you
 -- can review and edit all your changes in one view (edits write back like any
--- excerpt).
+-- stitch).
 --
 -- Works with git and jujutsu: both emit a git-format unified diff
 -- (`git diff` / `jj diff --git`), parsed identically. The VCS is auto-detected
@@ -78,19 +78,19 @@ end
 function M.run(revspec, present)
   local argv, root = resolve(revspec)
   if not argv then
-    vim.notify('excerpts: not inside a git or jj repository', vim.log.levels.ERROR)
+    vim.notify('stitches: not inside a git or jj repository', vim.log.levels.ERROR)
     return
   end
 
   local result = vim.system(argv, { text = true }):wait()
   if result.code ~= 0 then
-    vim.notify('excerpts: ' .. argv[1] .. ' diff failed\n' .. (result.stderr or ''), vim.log.levels.ERROR)
+    vim.notify('stitches: ' .. argv[1] .. ' diff failed\n' .. (result.stderr or ''), vim.log.levels.ERROR)
     return
   end
 
   local items = parse(result.stdout, root)
   if #items == 0 then
-    vim.notify('excerpts: no changes to show', vim.log.levels.WARN)
+    vim.notify('stitches: no changes to show', vim.log.levels.WARN)
     return
   end
 

@@ -1,4 +1,4 @@
--- Reconciliation kernel: the single place the excerpts buffer is diffed against
+-- Reconciliation kernel: the single place the stitch buffer is diffed against
 -- the snapshot taken at paint time.
 --
 -- The buffer text is pure source; `st.snapshot` is what was painted and

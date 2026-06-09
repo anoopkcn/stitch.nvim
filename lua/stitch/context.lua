@@ -1,11 +1,11 @@
--- Interactive expand/collapse of the context around the excerpt under the cursor.
+-- Interactive expand/collapse of the context around the stitch under the cursor.
 --
 -- Each match carries a per-match context level (lines shown above/below). Expand
 -- raises the level of every match in the block under the cursor; collapse lowers
 -- it (floor 0). The view is then repainted from the mutated levels.
-local config = require('excerpts.config')
-local render = require('excerpts.render')
-local model = require('excerpts.model')
+local config = require('stitch.config')
+local render = require('stitch.render')
+local model = require('stitch.model')
 
 local M = {}
 
@@ -25,13 +25,13 @@ local function adjust(buf, count, sign)
   -- Expand/collapse re-lays-out the buffer, which can't preserve structural
   -- (multi-line / insert / delete) edits. Require a clean buffer first.
   if vim.bo[buf].modified then
-    vim.notify('excerpts: write (:w) before expand/collapse', vim.log.levels.WARN)
+    vim.notify('stitches: write (:w) before expand/collapse', vim.log.levels.WARN)
     return
   end
 
   local rec = render.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   if not rec then
-    vim.notify('excerpts: no excerpt under the cursor', vim.log.levels.INFO)
+    vim.notify('stitches: no stitch under the cursor', vim.log.levels.INFO)
     return
   end
 
@@ -71,12 +71,12 @@ local function adjust(buf, count, sign)
   end
 end
 
---- Show more context around the excerpt under the cursor.
+--- Show more context around the stitch under the cursor.
 function M.expand(buf, count)
   adjust(buf, count, 1)
 end
 
---- Show less context around the excerpt under the cursor.
+--- Show less context around the stitch under the cursor.
 function M.collapse(buf, count)
   adjust(buf, count, -1)
 end

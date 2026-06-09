@@ -1,5 +1,5 @@
 -- Paints a source model into a dedicated, editable `acwrite` buffer:
---   * one real line per excerpt/context line (the source line text)
+--   * one real line per stitch/context line (the source line text)
 --   * file headers and block dividers as virt_lines (zero bytes, not editable)
 --   * source line number shown inline (virt_text), match span underlined
 --   * quickfix annotation (e.g. diagnostic message) at end of line
@@ -7,15 +7,15 @@
 -- Each line carries an "anchor" extmark whose id maps back to its source
 -- {filename, bufnr, lnum}. That stable line address is what write-back,
 -- jump-to-source, and expand/collapse all rely on.
-local config = require('excerpts.config')
-local model = require('excerpts.model')
-local reconcile = require('excerpts.reconcile')
-local intent = require('excerpts.intent')
-local srclang = require('excerpts.lang')
+local config = require('stitch.config')
+local model = require('stitch.model')
+local reconcile = require('stitch.reconcile')
+local intent = require('stitch.intent')
+local srclang = require('stitch.lang')
 
 local M = {}
 
-local ns = vim.api.nvim_create_namespace('excerpts')
+local ns = vim.api.nvim_create_namespace('stitch')
 
 -- bufnr -> {
 --   marks = { [extmark_id] = { filename, bufnr, lnum, col, source } },
@@ -29,10 +29,10 @@ M.ns = ns
 
 -- Separate namespace for static match-span highlights (kept out of the anchor
 -- namespace so record_at/the editor never see them).
-local match_ns = vim.api.nvim_create_namespace('excerpts_match')
+local match_ns = vim.api.nvim_create_namespace('stitch_match')
 
 -- Per-inserted-line attribution (which file an ambiguous boundary insert joins)
--- lives in the `excerpts.intent` module; render only calls into it.
+-- lives in the `stitch.intent` module; render only calls into it.
 
 local function setup_highlights()
   local set = function(name, val)
@@ -45,15 +45,15 @@ local function setup_highlights()
     return (vim.api.nvim_get_hl(0, { name = group, link = false }) or {})[key]
   end
   local hbg = attr('CursorLine', 'bg') or attr('Visual', 'bg')
-  set('ExcerptsHeaderBg', { bg = hbg }) -- the bar fill past the text
-  set('ExcerptsHeaderDir', { fg = attr('Comment', 'fg'), bg = hbg }) -- dimmed path
-  set('ExcerptsHeaderName', { fg = attr('Normal', 'fg'), bg = hbg, bold = true }) -- file name
+  set('StitchHeaderBg', { bg = hbg }) -- the bar fill past the text
+  set('StitchHeaderDir', { fg = attr('Comment', 'fg'), bg = hbg }) -- dimmed path
+  set('StitchHeaderName', { fg = attr('Normal', 'fg'), bg = hbg, bold = true }) -- file name
 
-  set('ExcerptsLnum', { link = 'LineNr' })
-  set('ExcerptsContextLnum', { link = 'NonText' })
-  set('ExcerptsAnnotation', { link = 'Comment' })
-  set('ExcerptsSeparator', { link = 'NonText' })
-  set('ExcerptsMatch', { underline = true, sp = '#61afef' })
+  set('StitchLnum', { link = 'LineNr' })
+  set('StitchContextLnum', { link = 'NonText' })
+  set('StitchAnnotation', { link = 'Comment' })
+  set('StitchSeparator', { link = 'NonText' })
+  set('StitchMatch', { underline = true, sp = '#61afef' })
 end
 setup_highlights()
 -- :colorscheme clears user-added groups, so re-resolve the header colours after.
@@ -66,11 +66,11 @@ local function header_chunks(relname)
   if not dir then
     dir, base = '', relname
   end
-  local chunks = { { ' ', 'ExcerptsHeaderDir' } } -- small left margin on the bar
+  local chunks = { { ' ', 'StitchHeaderDir' } } -- small left margin on the bar
   if dir ~= '' then
-    chunks[#chunks + 1] = { dir, 'ExcerptsHeaderDir' }
+    chunks[#chunks + 1] = { dir, 'StitchHeaderDir' }
   end
-  chunks[#chunks + 1] = { base, 'ExcerptsHeaderName' }
+  chunks[#chunks + 1] = { base, 'StitchHeaderName' }
   return chunks
 end
 
@@ -79,12 +79,12 @@ end
 -- clipped to the window width.
 local function header_bar(relname)
   local chunks = header_chunks(relname)
-  chunks[#chunks + 1] = { string.rep(' ', 400), 'ExcerptsHeaderBg' }
+  chunks[#chunks + 1] = { string.rep(' ', 400), 'StitchHeaderBg' }
   return chunks
 end
 
 local function unique_name(title)
-  local base = '[Excerpts] ' .. title
+  local base = '[Stitch] ' .. title
   local name = base
   local n = 1
   while vim.fn.bufexists(name) == 1 do
@@ -97,7 +97,7 @@ end
 local function file_header(relname, is_first)
   local lines = {}
   if not is_first then
-    lines[#lines + 1] = { { '', 'ExcerptsSeparator' } }
+    lines[#lines + 1] = { { '', 'StitchSeparator' } }
   end
   lines[#lines + 1] = header_bar(relname)
   return lines
@@ -106,7 +106,7 @@ end
 -- Divider shown between two non-adjacent blocks of the same file: a dim `⋮` in
 -- the line-number gutter. The jump in line numbers already shows the gap's size.
 local function block_divider()
-  return { { { '   ⋮', 'ExcerptsSeparator' } } }
+  return { { { '   ⋮', 'StitchSeparator' } } }
 end
 
 local function open_window(buf)
@@ -142,7 +142,7 @@ local function set_keymaps(buf)
   local opts = { buffer = buf, nowait = true, silent = true }
   if keys.jump then
     vim.keymap.set('n', keys.jump, function()
-      require('excerpts.nav').jump(buf)
+      require('stitch.nav').jump(buf)
     end, opts)
   end
   if keys.close then
@@ -153,20 +153,20 @@ local function set_keymaps(buf)
   if keys.expand then
     vim.keymap.set('n', keys.expand, function()
       local n = vim.v.count
-      require('excerpts.context').expand(buf, n > 0 and n or nil)
+      require('stitch.context').expand(buf, n > 0 and n or nil)
     end, opts)
   end
   if keys.collapse then
     vim.keymap.set('n', keys.collapse, function()
       local n = vim.v.count
-      require('excerpts.context').collapse(buf, n > 0 and n or nil)
+      require('stitch.context').collapse(buf, n > 0 and n or nil)
     end, opts)
   end
 end
 
 -- Native `gc`/`gcc` reads 'commentstring' to choose the comment syntax — pure
 -- source text doesn't tell it the language. Keep it matching the source file
--- under the cursor so commenting uses each excerpt's own syntax. (Single-line
+-- under the cursor so commenting uses each stitch's own syntax. (Single-line
 -- and single-file selections are correct; a mixed-language multi-line selection
 -- uses the cursor line's syntax — native commenting has one commentstring per
 -- invocation.)
@@ -179,7 +179,7 @@ local function update_commentstring(buf)
   if rec then
     vim.bo[buf].commentstring = srclang.commentstring(rec.filename)
     -- Remember the file under the cursor so a line inserted next is attributed
-    -- to it. Only updates on real excerpt lines, so it survives the cursor
+    -- to it. Only updates on real stitch lines, so it survives the cursor
     -- landing on a freshly-inserted (unanchored) line.
     intent.note_cursor(buf, rec.filename)
   end
@@ -300,13 +300,13 @@ local function decorate(buf, st, rows)
       intent.tag(buf, row)
       vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
         right_gravity = false,
-        virt_text = { { GUTTER, 'ExcerptsContextLnum' } },
+        virt_text = { { GUTTER, 'StitchContextLnum' } },
         virt_text_pos = 'inline',
       })
     else
       -- Anchor extmark + inline source line number. Backs record_at (nav /
       -- expand / highlight). Match lines get a brighter number than context.
-      local lnum_hl = info.is_match and 'ExcerptsLnum' or 'ExcerptsContextLnum'
+      local lnum_hl = info.is_match and 'StitchLnum' or 'StitchContextLnum'
       local id = vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
         right_gravity = false,
         invalidate = false,
@@ -318,7 +318,7 @@ local function decorate(buf, st, rows)
       if info.annotation then
         vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
           right_gravity = false,
-          virt_text = { { '  ┊ ' .. info.annotation, 'ExcerptsAnnotation' } },
+          virt_text = { { '  ┊ ' .. info.annotation, 'StitchAnnotation' } },
           virt_text_pos = 'eol',
         })
       end
@@ -329,7 +329,7 @@ local function decorate(buf, st, rows)
         vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
           virt_text = header_bar(info.relname),
           virt_text_pos = 'overlay',
-          line_hl_group = 'ExcerptsHeaderBg', -- belt-and-suspenders full-width fill
+          line_hl_group = 'StitchHeaderBg', -- belt-and-suspenders full-width fill
         })
       elseif info.first_in_file then
         -- New lines inserted directly above this file's first line join this file
@@ -368,7 +368,7 @@ local function decorate(buf, st, rows)
             vim.api.nvim_buf_set_extmark(buf, match_ns, row, scol, {
               end_row = row,
               end_col = ecol,
-              hl_group = 'ExcerptsMatch',
+              hl_group = 'StitchMatch',
               priority = 200,
             })
           end
@@ -493,7 +493,7 @@ function M.redecorate(buf)
   end
 end
 
---- Render a source model into a new excerpts view. Returns (buf, win).
+--- Render a source model into a new stitch view. Returns (buf, win).
 function M.open(source)
   local buf = vim.api.nvim_create_buf(true, true)
   local st = { marks = {} }
@@ -518,14 +518,14 @@ function M.open(source)
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
-  vim.bo[buf].filetype = 'excerpts'
+  vim.bo[buf].filetype = 'stitch'
   pcall(vim.api.nvim_buf_set_name, buf, unique_name(source.title or 'list'))
   vim.bo[buf].modified = false
 
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     buffer = buf,
     callback = function(args)
-      require('excerpts.edit').save(args.buf)
+      require('stitch.edit').save(args.buf)
     end,
   })
 
@@ -538,7 +538,7 @@ function M.open(source)
     end,
   })
 
-  require('excerpts.highlight').ensure()
+  require('stitch.highlight').ensure()
 
   vim.api.nvim_create_autocmd('CursorMoved', {
     buffer = buf,
@@ -572,7 +572,7 @@ function M.open(source)
 
   local win = open_window(buf)
   set_keymaps(buf)
-  -- Land on the first excerpt, not the blank spacer at row 0.
+  -- Land on the first stitch, not the blank spacer at row 0.
   pcall(vim.api.nvim_win_set_cursor, win, { math.min(2, vim.api.nvim_buf_line_count(buf)), 0 })
   update_commentstring(buf) -- initial, before the cursor first moves
   return buf, win

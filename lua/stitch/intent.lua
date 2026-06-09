@@ -12,7 +12,7 @@
 -- survives later edits; the whole baseline is cleared on (re)paint via reset().
 local M = {}
 
-local ns = vim.api.nvim_create_namespace('excerpts_intent')
+local ns = vim.api.nvim_create_namespace('stitch_intent')
 
 -- buf -> { cursor_file = filename|nil, marks = { [extmark_id] = filename|false } }.
 -- A mark tagged `false` means "inserted while cursor_file was unknown" — recorded
@@ -29,7 +29,7 @@ local function state_of(buf)
 end
 
 --- Record the file under the cursor — the file an inserted line will join next.
---- Called only on real excerpt lines (see render.update_commentstring) so it
+--- Called only on real stitch lines (see render.update_commentstring) so it
 --- survives the cursor landing on a freshly-inserted (unanchored) line.
 function M.note_cursor(buf, filename)
   state_of(buf).cursor_file = filename
