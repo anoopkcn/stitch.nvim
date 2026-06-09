@@ -63,28 +63,75 @@ function M.compute(snapshot, current, origin)
   return { map = map, hunks = hunks }
 end
 
---- Derive each row's layout role from the *live* adjacency of `rows` (rows[i] is
---- the source info for current row i, or false for the spacer / an inserted line).
---- Returns bounds[i] = { first_in_file?, is_first_file?, block_divider? } for the
---- rows that begin a file or a non-contiguous block; nil otherwise. Computed live
---- (not baked at paint) so a deletion of a file/block's first displayed line
---- promotes the new top row to carry the header/divider instead of losing it.
---- @param rows table[] info-or-false per current row (1-based)
-function M.layout_bounds(rows)
-  local bounds = {}
-  local prev -- the previous row's source info
-  for i = 1, #rows do
-    local info = rows[i]
+--- Decompose the live row→source map into blocks: maximal runs of rows that
+--- are mapped, same-file, and source-contiguous (each row's lnum follows the
+--- previous one's). The spacer and inserted rows (false in `map`) break a
+--- run. Each block carries its start row's layout role, computed from the
+--- *live* adjacency to the previous mapped row — not baked at paint — so a
+--- deletion of a file/block's first displayed line promotes the next block to
+--- carry the header/divider instead of losing it:
+---   * first_in_file / is_first_file — the block opens a new file (the first
+---     file's header rides the row-0 spacer)
+---   * block_divider — same file, but its lnums don't continue the previous
+---     block's (a `⋮` gap)
+---   * neither — the run was merely split by an inserted row; no chrome.
+--- This is the single implementation of the block concept: the renderer's
+--- header/divider placement (via layout_bounds) and the highlighter's
+--- projection blocks both consume it.
+--- @param map table[] info-or-false per current row (1-based)
+--- @return table[] blocks { s_row, e_row, filename, s_lnum, e_lnum,
+---         first_in_file?, is_first_file?, block_divider? } (rows are 1-based
+---         map indices: 0-based view row + 1)
+function M.blocks(map)
+  local blocks = {}
+  local prev, cur -- previous mapped info anywhere above; the open block
+  for i = 1, #map do
+    local info = map[i]
     if info and info.lnum then
-      if not prev or prev.filename ~= info.filename then
-        bounds[i] = { first_in_file = true, is_first_file = (prev == nil) }
-      elseif info.lnum ~= prev.lnum + 1 then
-        bounds[i] = { block_divider = true }
+      if cur and cur.filename == info.filename and info.lnum == cur.e_lnum + 1 then
+        cur.e_row, cur.e_lnum = i, info.lnum
+      else
+        cur = {
+          s_row = i, e_row = i,
+          filename = info.filename,
+          s_lnum = info.lnum, e_lnum = info.lnum,
+        }
+        if not prev or prev.filename ~= info.filename then
+          cur.first_in_file = true
+          cur.is_first_file = (prev == nil)
+        elseif info.lnum ~= prev.lnum + 1 then
+          cur.block_divider = true
+        end
+        blocks[#blocks + 1] = cur
       end
       prev = info
+    else
+      cur = nil -- spacer / inserted row: breaks the run
+    end
+  end
+  return blocks
+end
+
+--- The per-row view of blocks(): bounds[i] = { first_in_file?, is_first_file?,
+--- block_divider? } for rows that begin a file or a non-contiguous block; nil
+--- otherwise. What the renderer's per-row decoration walk consumes.
+function M.bounds_of(blocks)
+  local bounds = {}
+  for _, b in ipairs(blocks) do
+    if b.first_in_file then
+      bounds[b.s_row] = { first_in_file = true, is_first_file = b.is_first_file }
+    elseif b.block_divider then
+      bounds[b.s_row] = { block_divider = true }
     end
   end
   return bounds
+end
+
+--- bounds_of(blocks(rows)) in one call, for callers that only want the
+--- per-row flags.
+--- @param rows table[] info-or-false per current row (1-based)
+function M.layout_bounds(rows)
+  return M.bounds_of(M.blocks(rows))
 end
 
 return M

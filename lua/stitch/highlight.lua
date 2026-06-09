@@ -71,8 +71,6 @@ local function layout(buf, st)
   if not map then
     return nil
   end
-  local bounds = reconcile.layout_bounds(map)
-
   -- 1-based map indices of changed/inserted rows (±1 row of padding). Pure
   -- deletions (cb == 0) leave every remaining row's text intact, so they
   -- don't dirty anything — the split blocks still project correctly.
@@ -86,29 +84,28 @@ local function layout(buf, st)
     end
   end
 
-  local blocks, cur = {}, nil
-  for i = 1, #map do
-    local info = map[i]
-    if info and info.lnum then
-      if cur and not bounds[i] and cur.filename == info.filename and info.lnum == cur.e_lnum + 1 then
-        cur.e_row, cur.e_lnum = i, info.lnum
-        cur.dirty = cur.dirty or dirty[i] or false
-      else
-        cur = {
-          s_row = i, e_row = i, -- 1-based map indices (0-based view row + 1)
-          filename = info.filename,
-          s_lnum = info.lnum, e_lnum = info.lnum,
-          lang = srclang.ts_lang(info.filename),
-          dirty = dirty[i] or false,
-        }
-        blocks[#blocks + 1] = cur
+  -- The canonical block decomposition (shared with the renderer's
+  -- header/divider placement), annotated with what this module needs: the
+  -- block's Treesitter language and whether any of its rows is dirty.
+  local blocks = reconcile.blocks(map)
+  for _, blk in ipairs(blocks) do
+    blk.lang = srclang.ts_lang(blk.filename)
+    blk.dirty = false
+    for i = blk.s_row, blk.e_row do
+      if dirty[i] then
+        blk.dirty = true
+        break
       end
-    else
-      cur = nil -- spacer / inserted row: breaks the run (the row itself is in `dirty`)
     end
   end
 
-  st.hl_layout = { tick = tick, gen = b.gen, map = map, bounds = bounds, blocks = blocks }
+  st.hl_layout = {
+    tick = tick,
+    gen = b.gen,
+    map = map,
+    bounds = reconcile.bounds_of(blocks),
+    blocks = blocks,
+  }
   return st.hl_layout
 end
 
