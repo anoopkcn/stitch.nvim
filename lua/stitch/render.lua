@@ -361,7 +361,22 @@ local function decorate(buf, st, rows)
           virt_lines_overflow = 'trunc', -- clip the bar's pad to the window width
         })
       elseif info.block_divider then
-        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+        -- A line opened directly above this block's first line joins this block
+        -- (and is written into it) only when its insertion intent points here —
+        -- the cursor was on this block when the line was opened. Anchor the
+        -- divider above such lines so they read as part of this block, mirroring
+        -- edit.plan_hunk's lower-block branch (intent == this row's source). A
+        -- line opened while on the block above keeps the divider below it, so it
+        -- stays grouped with — and writes back into — that block.
+        local drow = row
+        while drow - 1 >= 1 and not rows[drow] do
+          local tagged = intent.tag(buf, drow - 1)
+          if not (tagged and tagged.filename == info.filename and tagged.lnum == info.lnum) then
+            break
+          end
+          drow = drow - 1
+        end
+        vim.api.nvim_buf_set_extmark(buf, ns, drow, 0, {
           right_gravity = false,
           virt_lines = block_divider(),
           virt_lines_above = true,
