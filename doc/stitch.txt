@@ -102,7 +102,8 @@ The remaining arguments are joined with spaces and passed to ripgrep as the
 search pattern. If no pattern is given, you are prompted for one.
 
 One stitch is created per matched line; the exact matched span(s) on each
-line are underlined (see |StitchMatch|). Requires `rg` on $PATH.
+line are highlighted with a translucent blue background (see |StitchMatch|).
+Requires `rg` on $PATH.
 
 Examples: >
     :Stitch grep TODO
@@ -171,13 +172,14 @@ Layout:
   • Stitches are grouped by file under a `{relative path}` header bar.
   • Each line shows its source line number inline on the left.
   • Match lines carry a brighter line number than surrounding context lines.
-  • The matched span(s) are underlined on top of syntax highlighting.
+  • The matched span(s) get a translucent blue background on top of syntax
+    highlighting.
   • Diagnostic (or other quickfix) messages appear as a trailing annotation.
   • When context hides part of a file, a `⋮` divider marks the gap (the jump
     in line numbers shows its size).
 
 Each real line maps 1:1 to one source line. There is one stitch per source
-line even if a line has several matches — their spans are all underlined.
+line even if a line has several matches — all their spans are highlighted.
 Files that cannot be read (or are empty) are skipped.
 
 ==============================================================================
@@ -316,8 +318,8 @@ with |stitch-highlight| = `false`.
 
 Match highlighting~
 
-The matched text itself is marked on top of syntax with a blue underline
-(|StitchMatch|):
+The matched text itself is marked on top of syntax with a translucent blue
+background (|StitchMatch|):
   • grep: the exact search span(s) reported by `rg --json`.
   • references / diagnostics: the symbol or diagnostic range (single-line
     ranges only).
@@ -358,8 +360,8 @@ highlight~
     Default: true
 
 Project each source file's Treesitter syntax highlighting onto its stitch
-lines. Set to `false` to render stitches uncoloured. Match-span underlining
-(|StitchMatch|) is independent of this setting.
+lines. Set to `false` to render stitches uncoloured. The match-span
+highlight (|StitchMatch|) is independent of this setting.
 
 ------------------------------------------------------------------------------
                                                          *stitch-context*
@@ -429,8 +431,10 @@ StitchContextLnum~
 
                                                            *StitchMatch*
 StitchMatch~
-    The matched span on a line, drawn over syntax. Default: blue underline
-    (`underline`, `sp = #61afef`).
+    The matched span on a line, drawn over syntax. Default: a translucent
+    blue background — blue (`#61afef`) blended into the editor background at
+    25% weight, since buffer-text highlights have no real alpha. Re-resolved
+    on |ColorScheme|.
 
                                                       *StitchAnnotation*
 StitchAnnotation~

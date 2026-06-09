@@ -88,7 +88,7 @@ require('stitch').setup({
 | `StitchHeaderName`    | bold (the file name) |
 | `StitchLnum`          | `LineNr`     |
 | `StitchContextLnum`   | `NonText`    |
-| `StitchMatch`         | blue underline |
+| `StitchMatch`         | translucent blue bg |
 | `StitchAnnotation`    | `Comment`    |
 | `StitchSeparator`     | `NonText`    |
 
