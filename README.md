@@ -57,8 +57,9 @@ Inside the view:
 
 `+`/`-` accept a count: `10+` reveals 10 lines at once.
 
-Each stitch shows its source line number inline; files are separated by a
-header. Diagnostics show their message as a trailing annotation.
+Each stitch shows its source line number in the gutter; each file is introduced
+by a full-width header bar showing the `dir/name` path, aligned to the left edge.
+Diagnostics show their message as a trailing annotation.
 
 ## Configuration
 
@@ -70,6 +71,7 @@ require('stitch').setup({
   highlight = true,  -- project Treesitter syntax highlighting onto stitches
   context = 1,       -- lines of source context shown above/below each match
   context_step = 1,  -- lines added/removed per +/- press (a count overrides it)
+  max_results = 2000, -- cap on grep results (false disables the cap)
   keys = {
     jump = '<CR>',
     close = 'q',
@@ -84,11 +86,11 @@ require('stitch').setup({
 | Group                       | Default link |
 | --------------------------- | ------------ |
 | `StitchHeaderBg`      | `CursorLine` bg (the header bar) |
-| `StitchHeaderDir`     | `Comment` fg (dimmed directory) |
-| `StitchHeaderName`    | bold (the file name) |
+| `StitchHeaderDir`     | `Comment` fg (dimmed directory on the bar) |
+| `StitchHeaderName`    | `Comment` fg (the file name on the bar, dimmed too) |
 | `StitchLnum`          | `LineNr`     |
 | `StitchContextLnum`   | `NonText`    |
 | `StitchMatch`         | translucent blue bg |
 | `StitchAnnotation`    | `Comment`    |
-| `StitchSeparator`     | `NonText`    |
+| `StitchSeparator`     | `NonText` (the `⋮` block divider and inter-file spacing) |
 

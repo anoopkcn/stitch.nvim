@@ -40,21 +40,23 @@ local function setup_highlights()
   local set = function(name, val)
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', val, { default = true }))
   end
-  -- The file-header groups carry a subtle background bar. They're *resolved* from
-  -- the colorscheme (not linked) because a single link can't combine a foreground
-  -- with a separate background; the ColorScheme autocmd below re-resolves them.
+  -- File headers carry a subtle full-width background bar with the path dimmed
+  -- onto it. The directory and file name are *resolved* against the bar background
+  -- (not linked, since a link can't combine a fg with a separate bg) and
+  -- re-resolved by the ColorScheme autocmd below.
   local function attr(group, key)
     return (vim.api.nvim_get_hl(0, { name = group, link = false }) or {})[key]
   end
   local hbg = attr('CursorLine', 'bg') or attr('Visual', 'bg')
   set('StitchHeaderBg', { bg = hbg }) -- the bar fill past the text
-  set('StitchHeaderDir', { fg = attr('Comment', 'fg'), bg = hbg }) -- dimmed path
-  set('StitchHeaderName', { fg = attr('Normal', 'fg'), bg = hbg, bold = true }) -- file name
+  set('StitchHeaderDir', { fg = attr('Comment', 'fg'), bg = hbg }) -- dimmed directory
+  set('StitchHeaderName', { fg = attr('Comment', 'fg'), bg = hbg }) -- file name (also dimmed)
 
   set('StitchLnum', { link = 'LineNr' })
   set('StitchContextLnum', { link = 'NonText' })
   set('StitchAnnotation', { link = 'Comment' })
   set('StitchSeparator', { link = 'NonText' })
+  set('StitchDivergent', { link = 'WarningMsg' }) -- edit.lua's skipped-hunk flags
   -- Buffer-text highlights have no real alpha, so a "transparent" blue is faked
   -- by blending the blue into the editor background at a low weight.
   local function blend(fg, bg, alpha)
@@ -73,19 +75,75 @@ setup_highlights()
 -- :colorscheme clears user-added groups, so re-resolve the header colours after.
 vim.api.nvim_create_autocmd('ColorScheme', { callback = setup_highlights })
 
+-- Width of the line-number gutter ('%5d ' is 5 digits + a space). Also the blank
+-- pad statuscol returns for rows with no source line (spacer, inserted, virtual)
+-- so the gutter keeps a constant width, and the number of leading path columns a
+-- file header spills into its (line-number-less) gutter.
+local GUTTER = string.rep(' ', 6)
+
 -- A wide invariant pad that fills the header background bar to the window edge
--- (nowrap + trunc clip the overflow). Hoisted out of header_bar so it isn't
+-- (nowrap + trunc clip the overflow). Hoisted out of header_parts so it isn't
 -- re-allocated for every header on every decorate.
 local HEADER_PAD = string.rep(' ', 400)
 
--- Header as inline-virt-text chunks on the background bar: the directory dimmed
--- and the file name bold, so it reads as a label rather than blending into code.
+-- Take the prefix of `s` spanning the first `n` display columns, plus the rest.
+-- Cuts on a character boundary, so a wide glyph that would straddle the cut goes
+-- wholly to the rest (the head is then padded to width by the caller).
+local function split_display(s, n)
+  if vim.fn.strdisplaywidth(s) <= n then
+    return s, ''
+  end
+  local head, used = {}, 0
+  for _, ch in ipairs(vim.fn.split(s, '\\zs')) do
+    local cw = vim.fn.strdisplaywidth(ch)
+    if used + cw > n then
+      break
+    end
+    head[#head + 1] = ch
+    used = used + cw
+  end
+  local hs = table.concat(head)
+  return hs, s:sub(#hs + 1)
+end
+
+-- Split a list of {text, hl} chunks at display column `width`. Returns the head as
+-- a `statuscolumn` string (each piece `%#hl#text`, with `%` escaped), padded with
+-- bar bg to exactly `width`, plus the remaining chunks. Used to spill the start of
+-- a file header into its otherwise-blank gutter so the path reads from column 0.
+local function split_chunks(chunks, width)
+  local head, tail, used = {}, {}, 0
+  for _, c in ipairs(chunks) do
+    local text, hl = c[1], c[2]
+    if used >= width then
+      tail[#tail + 1] = c
+    else
+      local w = vim.fn.strdisplaywidth(text)
+      if used + w <= width then
+        head[#head + 1] = '%#' .. hl .. '#' .. text:gsub('%%', '%%%%')
+        used = used + w
+      else
+        local hs, rest = split_display(text, width - used)
+        head[#head + 1] = '%#' .. hl .. '#' .. hs:gsub('%%', '%%%%')
+        used = used + vim.fn.strdisplaywidth(hs)
+        if rest ~= '' then
+          tail[#tail + 1] = { rest, hl }
+        end
+      end
+    end
+  end
+  if used < width then
+    head[#head + 1] = '%#StitchHeaderBg#' .. string.rep(' ', width - used)
+  end
+  return table.concat(head) .. '%*', tail
+end
+
+-- The header label chunks on the bar: the directory and file name, both dimmed.
 local function header_chunks(relname)
   local dir, base = relname:match('^(.*/)([^/]+)$')
   if not dir then
     dir, base = '', relname
   end
-  local chunks = { { ' ', 'StitchHeaderDir' } } -- small left margin on the bar
+  local chunks = {}
   if dir ~= '' then
     chunks[#chunks + 1] = { dir, 'StitchHeaderDir' }
   end
@@ -93,13 +151,14 @@ local function header_chunks(relname)
   return chunks
 end
 
--- Header chunks plus a wide trailing pad so the background bar reaches the window
--- edge. The view is `nowrap` and the headers truncate the overflow, so the pad is
--- clipped to the window width.
-local function header_bar(relname)
-  local chunks = header_chunks(relname)
-  chunks[#chunks + 1] = { HEADER_PAD, 'StitchHeaderBg' }
-  return chunks
+-- Split a header into (gutter statuscolumn string, body chunks). The first GUTTER
+-- columns of the path are drawn in the header row's gutter — which carries no line
+-- number — so the path starts at the left edge; the body is the remainder plus a
+-- wide pad so the bar reaches the window edge.
+local function header_parts(relname)
+  local gut, body = split_chunks(header_chunks(relname), #GUTTER)
+  body[#body + 1] = { HEADER_PAD, 'StitchHeaderBg' }
+  return gut, body
 end
 
 local function unique_name(title)
@@ -113,27 +172,83 @@ local function unique_name(title)
   return name
 end
 
--- A blank separator line above the header bar, marking the start of a file. Only
--- the second-and-later files reach here: the first file's header rides the row-0
--- spacer via an overlay extmark (see decorate), so the separator is always wanted.
-local function file_header(relname)
-  return {
-    { { '', 'StitchSeparator' } },
-    header_bar(relname),
-  }
+-- Divider shown between two non-adjacent blocks of the same file. The blank
+-- virt_line just reserves the row; statuscol paints the dim `⋮` in the gutter
+-- (see DIVIDER_GUTTER). The jump in line numbers already shows the gap's size.
+local function block_divider()
+  return { { { '', 'StitchSeparator' } } }
 end
 
--- Divider shown between two non-adjacent blocks of the same file: a dim `⋮` in
--- the line-number gutter. The jump in line numbers already shows the gap's size.
-local function block_divider()
-  return { { { '   ⋮', 'StitchSeparator' } } }
+-- Window-local view options stitch forces on its own view. The source
+-- line-number gutter is a real `statuscolumn` (not inline virt_text), so it's a
+-- genuine non-text column the cursor can never enter — the same as a normal
+-- buffer's number column, and correct on empty/inserted lines where inline
+-- virt_text would let the cursor render at screen column 0. These are
+-- window-local, so they're reasserted whenever the buffer is shown in another
+-- window (see open's BufWinEnter/WinEnter autocmd); otherwise a split would lose
+-- the gutter. M.FORCED_WINOPTS is read by nav to know which options a jump must
+-- restore on a window it splits off the stitch view.
+M.FORCED_WINOPTS = {
+  number = false,
+  relativenumber = false,
+  signcolumn = 'no',
+  wrap = false,
+  foldcolumn = '0',
+  list = false,
+  statuscolumn = "%!v:lua.require'stitch.render'.statuscol()",
+}
+
+-- Scope 'local' is load-bearing: `vim.wo[win][opt] = v` behaves like `:set`,
+-- writing the *global* default of these window options too — one stitch view
+-- would leak the stitch gutter / nowrap / nonumber into every window created
+-- afterwards, in any tab.
+local function apply_winopts(win)
+  for opt, val in pairs(M.FORCED_WINOPTS) do
+    vim.api.nvim_set_option_value(opt, val, { scope = 'local', win = win })
+  end
+end
+
+-- Snapshot the to-be-forced options from a window, so a jump that has to split
+-- off the stitch view can restore the user's real settings (the split would
+-- otherwise inherit stitch's forced ones, e.g. losing line numbers).
+local function capture_winopts(win)
+  local saved = {}
+  for opt in pairs(M.FORCED_WINOPTS) do
+    saved[opt] = vim.wo[win][opt]
+  end
+  return saved
+end
+
+--- Restore the forced options on a window that stops showing a stitch view —
+--- a window split off by a jump, or one left behind when the view is wiped or
+--- switched away from. `saved` is the snapshot open_window took of the user's
+--- real settings; without it (shouldn't happen) fall back to the global value,
+--- which at least clears the stitch statuscolumn. Explicit nil-check, not
+--- `a and b or c`: a captured `false` (e.g. nowrap, nonumber) is a valid value
+--- the ternary would wrongly drop to the global.
+function M.restore_winopts(win, saved)
+  for opt in pairs(M.FORCED_WINOPTS) do
+    local val = vim.go[opt]
+    if saved and saved[opt] ~= nil then
+      val = saved[opt]
+    end
+    vim.api.nvim_set_option_value(opt, val, { scope = 'local', win = win })
+  end
 end
 
 local function open_window(buf)
   local mode = config.options.window
-  -- Inherit the cursorline setting from the window we open from, rather than
-  -- forcing it on: if the user keeps cursorline off, keep it off here too.
+  -- Capture the options of the window we open *from*, before forcing stitch's:
+  -- cursorline is inherited (keep it off if the user keeps it off), and the full
+  -- set is stashed so a later jump can hand a freshly-split window the user's
+  -- real settings instead of stitch's. Captured here, before any split/buffer
+  -- swap fires the winopts reassertion, so it's the genuine user state. When
+  -- the window we open from itself shows a stitch view (window='current'
+  -- chains), inherit *its* snapshot — capturing its live options would record
+  -- stitch's forced ones as the user's.
   local cursorline = vim.wo.cursorline
+  local from_st = M.state[vim.api.nvim_get_current_buf()]
+  local normal_winopts = (from_st and from_st.normal_winopts) or capture_winopts(0)
   if mode == 'current' then
     vim.api.nvim_set_current_buf(buf)
   elseif mode == 'vsplit' then
@@ -147,13 +262,12 @@ local function open_window(buf)
     vim.api.nvim_win_set_buf(0, buf)
   end
   local win = vim.api.nvim_get_current_win()
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = 'no'
-  vim.wo[win].wrap = false
-  vim.wo[win].cursorline = cursorline
-  vim.wo[win].foldcolumn = '0'
-  vim.wo[win].list = false
+  local st = M.state[buf]
+  if st then
+    st.normal_winopts = normal_winopts
+  end
+  apply_winopts(win)
+  vim.api.nvim_set_option_value('cursorline', cursorline, { scope = 'local', win = win })
   return win
 end
 
@@ -205,13 +319,27 @@ local function update_commentstring(buf)
   if vim.api.nvim_win_get_buf(win) ~= buf then
     return
   end
-  local rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
+  -- CursorMoved is hot: skip the extmark lookup when the cursor is still on
+  -- the same row of the same buffer state (most motions are within a line).
+  local st = M.state[buf]
+  local row = vim.api.nvim_win_get_cursor(win)[1] - 1
+  local tick = vim.api.nvim_buf_get_changedtick(buf)
+  if st and st.cs_row == row and st.cs_tick == tick then
+    return
+  end
+  local rec = M.record_at(buf, row)
   if rec then
-    vim.bo[buf].commentstring = srclang.commentstring(rec.filename)
+    local cs = srclang.commentstring(rec.filename)
+    if vim.bo[buf].commentstring ~= cs then
+      vim.bo[buf].commentstring = cs
+    end
     -- Remember the source line under the cursor so a line inserted next is
     -- attributed to its side of a boundary. Only updates on real stitch lines,
     -- so it survives the cursor landing on a freshly-inserted (unanchored) line.
     intent.note_cursor(buf, { filename = rec.filename, lnum = rec.lnum })
+    if st then
+      st.cs_row, st.cs_tick = row, tick
+    end
   end
 end
 
@@ -245,8 +373,13 @@ end
 local function build_infos(st)
   local lines = { '' }
   local infos = {}
+  -- Each file's full source, read once here and reused for the drift baseline
+  -- (capture_sync) — otherwise every (re)paint reads every file twice.
+  local src_by_file = {}
   for fi, f in ipairs(st.view.files) do
-    local blocks = model.materialize(f, f.levels)
+    local src_lines = model.read_lines(f.filename, f.bufnr)
+    src_by_file[f.filename] = src_lines
+    local blocks = model.materialize(f, f.levels, src_lines)
     for bi, block in ipairs(blocks) do
       for li, line in ipairs(block.lines) do
         local row = #lines
@@ -266,24 +399,24 @@ local function build_infos(st)
       end
     end
   end
-  return lines, infos
+  return lines, infos, src_by_file
 end
 
 -- Find the buffer row currently showing (filename, lnum); falls back to the
 -- nearest displayed line of the same file. Returns a 0-based row or nil.
 local function row_for(buf, st, filename, lnum)
   local nearest, nearest_d
-  for id, rec in pairs(st.marks) do
-    if rec.filename == filename then
-      local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, id, {})
-      if pos and pos[1] then
-        if rec.lnum == lnum then
-          return pos[1]
-        end
-        local d = math.abs(rec.lnum - lnum)
-        if not nearest_d or d < nearest_d then
-          nearest_d, nearest = d, pos[1]
-        end
+  -- One bulk extmark query instead of a per-mark API call; marks that aren't
+  -- anchors (annotations, headers) have no st.marks record and are skipped.
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})) do
+    local rec = st.marks[m[1]]
+    if rec and rec.filename == filename then
+      if rec.lnum == lnum then
+        return m[2]
+      end
+      local d = math.abs(rec.lnum - lnum)
+      if not nearest_d or d < nearest_d then
+        nearest_d, nearest = d, m[2]
       end
     end
   end
@@ -301,8 +434,51 @@ end
 -- write-back diffs the edited buffer against. Native edits — `gcc`, `dd`, `J`,
 -- inserts, multi-line changes — need no special handling: the diff reconciles
 -- whatever state the buffer ends up in.
--- Width of the inline line-number gutter ('%5d ' is 5 digits + a space).
-local GUTTER = string.rep(' ', 6)
+-- The gutter cell for a block divider: the dim `⋮` aligned under the line
+-- numbers (column 4, where single-digit numbers sit).
+local DIVIDER_GUTTER = '%#StitchSeparator#    ⋮ %*'
+
+--- The source line-number gutter, rendered as a real `statuscolumn` (see
+--- apply_winopts). For a real buffer line it maps the drawn row back to its
+--- source line — via the paint baseline when the buffer is clean, or the live
+--- row→source map mid-edit (so inserted/split lines keep correct numbers); the
+--- diff only runs when the buffer is modified, so a clean redraw never pays for
+--- a reconcile. Match lines get a brighter number than context lines; the
+--- spacer and inserted lines get a blank pad.
+---
+--- The file header and block divider are virtual lines drawn above their anchor
+--- row, so the gutter is drawn for them too (v:virtnum < 0). Only the line closest
+--- to the anchor (-1) carries content — a header's blank separator (-2) and
+--- wrapped rows (>0) stay blank. st.gutter (rebuilt each decorate) maps an anchor
+--- line to { k, s }: k is 'header'/'divider' (drawn at v:virtnum == -1) or
+--- 'header0' (the first file's header, overlaid on the row-0 spacer at v:virtnum
+--- == 0). s is the ready statuscolumn string — for a header, the first GUTTER
+--- columns of the path, so the path reads from the left edge.
+function M.statuscol()
+  local win = vim.g.statusline_winid
+  local buf = win and win >= 0 and vim.api.nvim_win_get_buf(win)
+  local st = buf and M.state[buf]
+  if not st then
+    return GUTTER
+  end
+  local g = st.gutter and st.gutter[vim.v.lnum]
+  if vim.v.virtnum ~= 0 then
+    if vim.v.virtnum == -1 and g and (g.k == 'header' or g.k == 'divider') then
+      return g.s
+    end
+    return GUTTER
+  end
+  if g and g.k == 'header0' then
+    return g.s -- first file's header overlaid on the row-0 spacer
+  end
+  local map = vim.bo[buf].modified and M.live_map(buf) or st.origin
+  local info = map and map[vim.v.lnum]
+  if not info then
+    return GUTTER -- the row-0 spacer, or a line the user inserted (no source yet)
+  end
+  local hl = info.is_match and 'StitchLnum' or 'StitchContextLnum'
+  return string.format('%%#%s#%5d %%*', hl, info.lnum)
+end
 
 -- Place every per-row decoration for the current buffer from `rows`: rows[r+1] is
 -- the source info for buffer row r, or false for a row with no source (the row-0
@@ -311,40 +487,40 @@ local GUTTER = string.rep(' ', 6)
 -- inserted rows get a blank gutter so they stay aligned instead of shifting to
 -- column 0. This only sets extmarks — it never touches buffer text or undo — so
 -- it is safe to re-run on every structural edit.
-local function decorate(buf, st, rows)
+local function decorate(buf, st, rows, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   vim.api.nvim_buf_clear_namespace(buf, match_ns, 0, -1)
   st.marks = {}
+  -- Maps a 1-based line to { k, s } describing the gutter statuscol should paint
+  -- for the virt_line (header / divider) above it, or the row-0 header overlay
+  -- ('header0'). `s` is the ready statuscolumn string (a header spills its leading
+  -- path columns here). Rebuilt here so it tracks live header/divider placement.
+  st.gutter = {}
 
   -- Header/divider placement is derived from the *live* row adjacency, not from
   -- flags baked at paint: deleting a file's or block's first displayed line must
   -- promote the new top row to carry the header/divider instead of losing it.
   local bounds = reconcile.layout_bounds(rows)
 
-  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  -- Both callers already hold the buffer text (paint just set it; redecorate
+  -- diffed it), so a fresh full read is only a fallback.
+  lines = lines or vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   for row = 0, #lines - 1 do
     local info = rows[row + 1]
     local b = bounds[row + 1]
     if row == 0 then -- the spacer: no decoration
     elseif not info then
-      -- Inserted line (no source yet): tag it with the file being edited (so a
-      -- boundary insert knows which file it joins) and give it a blank gutter so
-      -- it stays aligned instead of shifting to column 0.
+      -- Inserted line (no source yet): tag it with the file being edited so a
+      -- boundary insert knows which file it joins. Its blank gutter is handled
+      -- by statuscol (no source line → blank pad), so no anchor mark is placed.
       intent.tag(buf, row)
-      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
-        right_gravity = false,
-        virt_text = { { GUTTER, 'StitchContextLnum' } },
-        virt_text_pos = 'inline',
-      })
     else
-      -- Anchor extmark + inline source line number. Backs record_at (nav /
-      -- expand / highlight). Match lines get a brighter number than context.
-      local lnum_hl = info.is_match and 'StitchLnum' or 'StitchContextLnum'
+      -- Anchor extmark backing record_at (nav / expand / highlight) and the
+      -- statuscol number lookup. The line number itself is drawn by the
+      -- statuscolumn, not an inline virt_text, so the cursor never sits in it.
       local id = vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
         right_gravity = false,
         invalidate = false,
-        virt_text = { { string.format('%5d ', info.lnum), lnum_hl } },
-        virt_text_pos = 'inline',
       })
       st.marks[id] = info
 
@@ -358,12 +534,15 @@ local function decorate(buf, st, rows)
 
       if b and b.first_in_file and b.is_first_file then
         -- virt_lines don't render *above* line 0, so show the first file's header
-        -- on the row-0 spacer itself rather than leaving that line blank.
+        -- on the row-0 spacer itself rather than leaving that line blank. `gut` is
+        -- the path's leading columns, drawn in the row-0 gutter (see statuscol).
+        local gut, body = header_parts(info.relname)
         vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-          virt_text = header_bar(info.relname),
+          virt_text = body,
           virt_text_pos = 'overlay',
           line_hl_group = 'StitchHeaderBg', -- belt-and-suspenders full-width fill
         })
+        st.gutter[1] = { k = 'header0', s = gut }
       elseif b and b.first_in_file then
         -- New lines inserted directly above this file's first line join this file
         -- (and prepend on save) only if they were created while editing it, so
@@ -377,12 +556,16 @@ local function decorate(buf, st, rows)
           end
           hrow = hrow - 1
         end
+        -- A blank separator line (-2) above the bar (-1); the bar's leading path
+        -- columns ride its gutter (statuscol reads st.gutter at v:virtnum == -1).
+        local gut, body = header_parts(info.relname)
         vim.api.nvim_buf_set_extmark(buf, ns, hrow, 0, {
           right_gravity = false,
-          virt_lines = file_header(info.relname),
+          virt_lines = { { { '', 'StitchSeparator' } }, body },
           virt_lines_above = true,
           virt_lines_overflow = 'trunc', -- clip the bar's pad to the window width
         })
+        st.gutter[hrow + 1] = { k = 'header', s = gut }
       elseif b and b.block_divider then
         -- A line opened directly above this block's first line joins this block
         -- (and is written into it) only when its insertion intent points here —
@@ -404,6 +587,7 @@ local function decorate(buf, st, rows)
           virt_lines = block_divider(),
           virt_lines_above = true,
         })
+        st.gutter[drow + 1] = { k = 'divider', s = DIVIDER_GUTTER } -- ⋮ in this row's gutter
       end
 
       -- Highlight the matched span(s), clamped to the row's current text.
@@ -444,9 +628,11 @@ local function capture_sync_file(f, lines)
   f.sync_size = stat and stat.size or nil
 end
 
-local function capture_sync(st)
+-- `lines_by_file` (optional) provides already-read source content keyed by
+-- filename, so a paint that just read every file doesn't read them all again.
+local function capture_sync(st, lines_by_file)
   for _, f in ipairs(st.view.files) do
-    capture_sync_file(f)
+    capture_sync_file(f, lines_by_file and lines_by_file[f.filename])
   end
 end
 
@@ -487,7 +673,7 @@ end
 -- Records st.snapshot (painted text) and st.origin (per-row source info) as the
 -- baseline that write-back and the live row→source map diff against.
 local function paint(buf, st)
-  local lines, infos = build_infos(st)
+  local lines, infos, src_by_file = build_infos(st)
 
   -- Disable undo across the (re)layout: anchors are placed manually and can't
   -- survive an undo, so this view op is intentionally non-undoable.
@@ -511,13 +697,14 @@ local function paint(buf, st)
   -- regions on the next redraw.
   st.ts_regions_count = nil
 
-  decorate(buf, st, st.origin)
+  decorate(buf, st, st.origin, lines)
   st.decorated_count = #lines
   st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
 
   -- The view now matches current source: reset the drift baseline so a later
-  -- focus event doesn't read this paint as external change.
-  capture_sync(st)
+  -- focus event doesn't read this paint as external change. The lines read by
+  -- build_infos are reused, so this doesn't re-read every file.
+  capture_sync(st, src_by_file)
 
   vim.bo[buf].undolevels = save_undolevels
   vim.bo[buf].modified = false
@@ -590,6 +777,121 @@ function M.rebase_inplace(buf, current)
   capture_sync(st)
 end
 
+--- Advance the diff baseline for just the applied plans of a *partial* save
+--- (some hunks diverged or were unmappable, so the buffer stays modified and no
+--- repaint happens — repainting would discard the user's un-written edits).
+--- Splices each applied plan's new lines into st.snapshot/st.origin so the next
+--- diff no longer reports them, shifts the origin line numbers below each
+--- structural edit (in lockstep with the model shift the editor already did),
+--- and advances each written file's drift baseline so render.sync doesn't read
+--- our own write as external change. Plans carry s0/s1 (the snapshot rows they
+--- replace; s1 < s0 for an insertion) and l0/l1/newlines in the source
+--- coordinates of the current baseline; only plans with .applied are consumed.
+function M.rebase_partial(buf, plans)
+  local st = M.state[buf]
+  if not st or not st.snapshot then
+    return
+  end
+  local applied = {}
+  for _, p in ipairs(plans) do
+    if p.applied then
+      applied[#applied + 1] = p
+    end
+  end
+  if #applied == 0 then
+    return
+  end
+  table.sort(applied, function(a, b)
+    return a.s0 < b.s0
+  end)
+
+  -- Splice the applied regions into a new snapshot/origin pair. Origin rows of
+  -- a file below one of its structural edits shift by the running per-file
+  -- delta; the info tables are mutated in place, so st.marks (which shares
+  -- them) stays consistent too.
+  local snap, origin, delta = {}, {}, {}
+  local si = 1
+  local function copy_to(last)
+    while si <= last do
+      local o = st.origin[si]
+      if o and o.lnum and delta[o.filename] then
+        o.lnum = o.lnum + delta[o.filename]
+      end
+      snap[#snap + 1] = st.snapshot[si]
+      origin[#origin + 1] = o or false
+      si = si + 1
+    end
+  end
+  for _, p in ipairs(applied) do
+    copy_to(p.s0 - 1)
+    si = math.max(si, p.s1 + 1) -- drop the replaced rows (insertion: s1 < s0, no-op)
+    local d = delta[p.filename] or 0
+    -- A 1:1 in-place replacement keeps each row's identity (is_match drives the
+    -- gutter brightness); spans/annotation are dropped — the text changed.
+    local inplace = p.s1 >= p.s0 and #p.newlines == (p.s1 - p.s0 + 1)
+    for k, line in ipairs(p.newlines) do
+      local old = inplace and st.origin[p.s0 + k - 1] or nil
+      snap[#snap + 1] = line
+      origin[#origin + 1] = {
+        filename = p.filename,
+        relname = p.relname,
+        bufnr = p.bufnr,
+        lnum = p.l0 + d + k - 1,
+        col = (old and old.col) or 1,
+        is_match = (old and old.is_match) or nil,
+        source = line,
+      }
+    end
+    delta[p.filename] = d + #p.newlines - math.max(0, p.l1 - p.l0 + 1)
+  end
+  copy_to(#st.snapshot)
+  st.snapshot = snap
+  st.origin = origin
+  st.live = nil -- changedtick didn't move; a stale cached diff would replay the old hunks
+
+  -- Advance each written file's drift baseline by the same edits. If the
+  -- result matches the file's actual content, our write was the only change
+  -- and the markers can move with it; otherwise the file *also* drifted
+  -- externally — keep the markers stale so sync() still sees that drift.
+  local by_file = {}
+  for _, p in ipairs(applied) do
+    by_file[p.filename] = by_file[p.filename] or {}
+    table.insert(by_file[p.filename], p)
+  end
+  for filename, fplans in pairs(by_file) do
+    local f = st.view.files_by_name[filename]
+    if f and f.sync_lines then
+      table.sort(fplans, function(a, b)
+        return a.l0 < b.l0
+      end)
+      local expected, i = {}, 1
+      for _, p in ipairs(fplans) do
+        while i < p.l0 do
+          expected[#expected + 1] = f.sync_lines[i]
+          i = i + 1
+        end
+        for _, line in ipairs(p.newlines) do
+          expected[#expected + 1] = line
+        end
+        i = math.max(i, p.l1 + 1)
+      end
+      while i <= #f.sync_lines do
+        expected[#expected + 1] = f.sync_lines[i]
+        i = i + 1
+      end
+      local actual = model.read_lines(f.filename, f.bufnr)
+      if lines_equal(actual, expected) then
+        capture_sync_file(f, actual)
+      else
+        f.sync_lines = expected
+      end
+    end
+  end
+
+  -- Give the spliced-in rows their anchors (record_at / jump / gutter numbers).
+  M.redecorate(buf)
+end
+
 --- Re-place the gutter and decorations for the current (edited) buffer so
 --- inserted/split lines don't lose their numbers, shift, or break highlighting.
 --- Only sets extmarks — never touches buffer text or undo.
@@ -598,9 +900,9 @@ function M.redecorate(buf)
   if not st or not st.snapshot then
     return
   end
-  local map = M.live_map(buf)
-  if map then
-    decorate(buf, st, map)
+  local e = live_entry(buf)
+  if e and e.map then
+    decorate(buf, st, e.map, e.current) -- e.current: the exact text e.map was diffed from
     st.decorated_count = vim.api.nvim_buf_line_count(buf)
     st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
   end
@@ -716,8 +1018,30 @@ function M.open(source)
     buffer = buf,
     once = true,
     callback = function()
+      -- Hand windows still showing the view (e.g. window='current') their real
+      -- options back: they're about to show another buffer and would otherwise
+      -- keep the stitch gutter / nonumber for good.
+      local st = M.state[buf]
+      for _, w in ipairs(vim.fn.win_findbuf(buf)) do
+        M.restore_winopts(w, st and st.normal_winopts)
+      end
       intent.discard(buf)
       M.state[buf] = nil
+    end,
+  })
+
+  -- The user can also switch the stitch window to another buffer (`:b#`,
+  -- `:edit file`) without wiping the view; restore that window's options as
+  -- the buffer leaves it. (BufWinLeave doesn't fire while the view stays
+  -- visible in another window — which keeps its forced options, correctly.)
+  vim.api.nvim_create_autocmd('BufWinLeave', {
+    buffer = buf,
+    callback = function()
+      local win = vim.api.nvim_get_current_win()
+      if vim.api.nvim_win_get_buf(win) == buf then
+        local st = M.state[buf]
+        M.restore_winopts(win, st and st.normal_winopts)
+      end
     end,
   })
 
@@ -760,6 +1084,20 @@ function M.open(source)
     buffer = buf,
     callback = function()
       M.sync(buf)
+    end,
+  })
+
+  -- The view options (and the statuscolumn gutter in particular) are
+  -- window-local, so reassert them whenever this buffer is displayed in a window
+  -- — e.g. a `<C-w>s` split — or it would render there with the default number
+  -- column and lose the source-line gutter entirely.
+  vim.api.nvim_create_autocmd({ 'BufWinEnter', 'WinEnter' }, {
+    buffer = buf,
+    callback = function()
+      local win = vim.api.nvim_get_current_win()
+      if vim.api.nvim_win_get_buf(win) == buf then
+        apply_winopts(win)
+      end
     end,
   })
 

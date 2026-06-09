@@ -169,8 +169,9 @@ The view is a dedicated, editable scratch buffer (filetype `stitch`,
 buftype `acwrite`). It is opened where |stitch-window| says.
 
 Layout:
-  • Stitches are grouped by file under a `{relative path}` header bar.
-  • Each line shows its source line number inline on the left.
+  • Stitches are grouped by file under a full-width header bar showing the
+    `{relative path}`, aligned to the left edge.
+  • Each line shows its source line number in the left gutter.
   • Match lines carry a brighter line number than surrounding context lines.
   • The matched span(s) get a translucent blue background on top of syntax
     highlighting.
@@ -333,6 +334,7 @@ Pass options to |stitch.setup()| (or to lazy.nvim's `opts`). Defaults: >
       highlight = true,   -- project Treesitter highlighting onto stitches
       context = 1,        -- source context lines above/below each match
       context_step = 1,   -- lines added/removed per +/- press
+      max_results = 2000, -- cap on grep results (false disables)
       keys = {
         jump = '<CR>',
         close = 'q',
@@ -383,6 +385,17 @@ Lines added or removed per `+` / `-` press. A count on the mapping overrides
 it for that press (e.g. `10+` adds 10 lines regardless of this value).
 
 ------------------------------------------------------------------------------
+                                                     *stitch-max-results*
+max_results~
+    Type: integer or false
+    Default: 2000
+
+Cap on the number of |:Stitch| grep results. A broad pattern in a large
+repository would otherwise build an enormous view (and read every matched
+file) in one UI-blocking tick. A notification tells you when results were
+truncated. Set to `false` to disable the cap.
+
+------------------------------------------------------------------------------
                                                             *stitch-keys*
 keys~
     Type: table
@@ -405,11 +418,16 @@ does. Set a field to a false-y value to disable that mapping: >
 All groups are defined with `default = true`, so any link you set before or
 after setup wins. Override them with |:highlight| (or `nvim_set_hl`).
 
+A file header is a full-width background bar showing the path, `{dir}{name}`,
+dimmed onto it. The path starts at the left edge: its leading characters are drawn
+in the header row's gutter (which carries no line number), the rest in the bar.
+
                                                         *StitchHeaderBg*
 StitchHeaderBg~
-    Background bar behind a file header. Default: the background of
-    |hl-CursorLine| (falling back to |hl-Visual|). The header groups below are
-    resolved with this background, and re-resolved on |ColorScheme|.
+    Background bar behind a file header (and its gutter cell). Default: the
+    background of |hl-CursorLine| (falling back to |hl-Visual|). The header
+    groups below are resolved against this background, re-resolved on
+    |ColorScheme|.
 
                                                        *StitchHeaderDir*
 StitchHeaderDir~
@@ -418,8 +436,8 @@ StitchHeaderDir~
 
                                                       *StitchHeaderName*
 StitchHeaderName~
-    The bold file name in a file header. Default: |hl-Normal| foreground,
-    `bold`, on the |StitchHeaderBg| background.
+    The file name in a file header. Default: |hl-Comment| foreground on the
+    |StitchHeaderBg| background (dimmed, matching |StitchHeaderDir|).
 
                                                             *StitchLnum*
 StitchLnum~
@@ -442,7 +460,8 @@ StitchAnnotation~
 
                                                        *StitchSeparator*
 StitchSeparator~
-    Block dividers and spacing between files. Default: |hl-NonText|.
+    The `⋮` block divider and the blank spacing between files.
+    Default: |hl-NonText|.
 
                                                        *StitchDivergent*
 StitchDivergent~

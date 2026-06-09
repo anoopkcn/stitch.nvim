@@ -79,9 +79,11 @@ end
 --- per-line records the renderer paints.
 --- @param file_src table source-model entry
 --- @param levels table<integer,integer>
+--- @param lines string[]|nil pre-read source lines (saves a re-read when the
+---        caller also needs them, e.g. paint's drift baseline)
 --- @return table[] blocks  { { lines = { {lnum,source,is_match,col,annotation,spans} } } }
-function M.materialize(file_src, levels)
-  local lines = read_lines(file_src.filename, file_src.bufnr)
+function M.materialize(file_src, levels, lines)
+  lines = lines or read_lines(file_src.filename, file_src.bufnr)
   local blocks = {}
   for _, range in ipairs(M.blocks_from_levels(file_src.match_lnums, levels, file_src.line_count, file_src.pinned)) do
     local block_lines = {}

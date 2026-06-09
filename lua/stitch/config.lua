@@ -17,6 +17,11 @@ M.defaults = {
   -- e.g. `10+` adds 10 lines).
   context_step = 1,
 
+  -- Cap on grep results: a broad pattern in a large repo would otherwise build
+  -- an enormous view (and read every matched file) in one UI-blocking tick.
+  -- The view notes when results were truncated. false disables the cap.
+  max_results = 2000,
+
   -- Buffer-local keymaps inside the stitch view.
   keys = {
     jump = '<CR>', -- open the source file at the line under the cursor

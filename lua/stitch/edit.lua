@@ -20,9 +20,10 @@ local intent = require('stitch.intent')
 local M = {}
 
 -- Inline warnings for skipped hunks; cleared and rebuilt on every save.
+-- (Their StitchDivergent group lives in render's setup_highlights, whose
+-- ColorScheme autocmd re-registers it — a group set here once at module load
+-- would be wiped by the first :colorscheme.)
 local warn_ns = vim.api.nvim_create_namespace('stitch_warn')
-
-vim.api.nvim_set_hl(0, 'StitchDivergent', { link = 'WarningMsg', default = true })
 
 -- Load (without focusing) the buffer backing `filename`; set_lines needs a loaded
 -- buffer. Loading an *unloaded* buffer reads the current on-disk state, so the
@@ -30,16 +31,29 @@ vim.api.nvim_set_hl(0, 'StitchDivergent', { link = 'WarningMsg', default = true 
 -- here: if it drifted on disk without being reloaded, source_intact compares
 -- against stale in-memory text and Neovim's write-time overwrite prompt is the
 -- backstop (the buffer's own focus autoread/checktime reloads it otherwise).
+--
+-- Returns (bufnr, created). `created` is true only when no buffer existed for the
+-- file and we had to make one purely to write it — that buffer is loaded
+-- *invisibly* (no window), so its read-time autocmds (FileType/Syntax/BufRead)
+-- fire now, hidden. The caller wipes it after writing so a later `<CR>` `:edit`s
+-- the file fresh instead of silently reusing a half-initialized, unhighlighted
+-- buffer. A pre-existing buffer (the user's, or an LSP source's) is never wiped.
 local function ensure_loaded(filename, bufnr)
   if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
     if not vim.api.nvim_buf_is_loaded(bufnr) then
       vim.fn.bufload(bufnr)
     end
-    return bufnr
+    return bufnr, false
   end
   local b = vim.fn.bufadd(filename)
+  -- bufadd returns an *existing* buffer when one matches the (normalized) name,
+  -- so test the buffer we actually got rather than the raw filename (which may be
+  -- relative while the user's buffer is absolute). A buffer we just created is
+  -- neither loaded nor listed yet; a pre-existing user/LSP buffer is one or both,
+  -- and must never be wiped.
+  local created = not vim.api.nvim_buf_is_loaded(b) and vim.fn.buflisted(b) == 0
   vim.fn.bufload(b)
-  return b
+  return b, created
 end
 
 local function flag(buf, row, message)
@@ -72,8 +86,11 @@ local function source_range(origin, i0, i1)
   return {
     filename = first.filename,
     bufnr = first.bufnr,
+    relname = first.relname,
     l0 = first.lnum,
     l1 = origin[i1].lnum,
+    s0 = i0,
+    s1 = i1,
     sources = sources,
   }
 end
@@ -84,7 +101,10 @@ end
 -- adjacent lines from different files), so a single hunk may yield several plans.
 --
 -- Each plan replaces source lines [l0, l1] (1-based) of `filename` with
--- `newlines`; l1 == l0 - 1 means a pure insertion before l0.
+-- `newlines`; l1 == l0 - 1 means a pure insertion before l0. Plans also carry
+-- s0/s1, the snapshot rows they replace (s1 < s0 for an insertion), so a
+-- partial save can splice the applied ones into the baseline
+-- (render.rebase_partial).
 local function plan_hunk(hunk, origin, current, buf)
   local sa, ca, sb, cb = hunk[1], hunk[2], hunk[3], hunk[4]
   local brow = math.max(0, sb - 1)
@@ -131,8 +151,9 @@ local function plan_hunk(hunk, origin, current, buf)
     end
     return {
       {
-        filename = ref.filename, bufnr = ref.bufnr,
+        filename = ref.filename, bufnr = ref.bufnr, relname = ref.relname,
         l0 = l0, l1 = l0 - 1, -- empty range ⇒ insert before l0
+        s0 = sa + 1, s1 = sa, -- no snapshot rows replaced; new rows go after row sa
         newlines = newlines, sources = {}, brow = brow,
       },
     }
@@ -218,7 +239,7 @@ function M.save(buf)
   local current, hunks, origin = R.current, R.hunks, R.origin
 
   -- Group mappable hunks by source file; flag the rest.
-  local by_file, order, unmappable = {}, {}, 0
+  local by_file, order, all_plans, unmappable = {}, {}, {}, 0
   for _, h in ipairs(hunks) do
     local plans, brow = plan_hunk(h, origin, current, buf)
     if #plans == 0 then
@@ -233,14 +254,15 @@ function M.save(buf)
         order[#order + 1] = plan.filename
       end
       f.plans[#f.plans + 1] = plan
+      all_plans[#all_plans + 1] = plan
     end
   end
 
-  local files_written, edits_applied, diverged = 0, 0, 0
+  local files_written, edits_applied, diverged, write_failed = 0, 0, 0, 0
 
   for _, filename in ipairs(order) do
     local f = by_file[filename]
-    local sbuf = ensure_loaded(filename, f.bufnr)
+    local sbuf, created = ensure_loaded(filename, f.bufnr)
     -- Apply bottom-up so earlier source line indices stay valid as we edit.
     table.sort(f.plans, function(a, b)
       return a.l0 > b.l0
@@ -249,6 +271,7 @@ function M.save(buf)
     for _, p in ipairs(f.plans) do
       if source_intact(sbuf, p) then
         vim.api.nvim_buf_set_lines(sbuf, p.l0 - 1, p.l1, false, p.newlines)
+        p.applied = true
         applied = applied + 1
         edits_applied = edits_applied + 1
       else
@@ -258,23 +281,44 @@ function M.save(buf)
       end
     end
     if applied > 0 then
-      vim.api.nvim_buf_call(sbuf, function()
+      -- The edits are already in the source buffer; a failed disk write
+      -- (read-only file, permissions) must not abort the whole save — the
+      -- buffer keeps the change, the remaining files still save, and the
+      -- summary still reports what happened.
+      local ok, err = pcall(vim.api.nvim_buf_call, sbuf, function()
         vim.cmd('silent keepjumps update')
       end)
-      files_written = files_written + 1
+      if ok then
+        files_written = files_written + 1
+      else
+        write_failed = write_failed + 1
+        for _, p in ipairs(f.plans) do
+          if p.applied then
+            flag(buf, p.brow, 'kept in buffer — file write failed')
+          end
+        end
+        vim.notify(('stitches: could not write %s: %s'):format(filename, err), vim.log.levels.ERROR)
+      end
+    end
+    -- Don't leave behind a buffer stitch loaded only to write: if a later `<CR>`
+    -- `:edit`s it, Neovim reuses the loaded buffer and fires no read-time
+    -- autocmds, so the file opens without syntax highlighting. Wiping it (only
+    -- when stitch created it, it's unmodified after the write, and no window
+    -- shows it) makes `<CR>` load it fresh with full filetype/syntax detection.
+    if created and vim.api.nvim_buf_is_valid(sbuf)
+        and not vim.bo[sbuf].modified and #vim.fn.win_findbuf(sbuf) == 0 then
+      pcall(vim.api.nvim_buf_delete, sbuf, { force = false })
     end
   end
 
-  -- Structural = some change added or removed source lines, so the displayed
-  -- line numbers below it shifted and the view must be re-laid-out. A purely
-  -- in-place save leaves the layout untouched.
+  -- Structural = some applied change added or removed source lines, so the
+  -- displayed line numbers below it shifted and the view must be re-laid-out.
+  -- A purely in-place save leaves the layout untouched.
   local structural = false
-  for _, filename in ipairs(order) do
-    for _, p in ipairs(by_file[filename].plans) do
-      if p.l1 < p.l0 or #p.newlines ~= (p.l1 - p.l0 + 1) then
-        structural = true
-        break
-      end
+  for _, p in ipairs(all_plans) do
+    if p.applied and (p.l1 < p.l0 or #p.newlines ~= (p.l1 - p.l0 + 1)) then
+      structural = true
+      break
     end
   end
 
@@ -306,7 +350,32 @@ function M.save(buf)
     vim.bo[buf].modified = false
   else
     -- Keep the user's edits (including un-written ones) and the inline flags so
-    -- they can resolve the conflict and save again.
+    -- they can resolve the conflict and save again. The hunks that *were*
+    -- applied must still advance the baseline: left in the diff, the next :w
+    -- would re-plan them, read our own write as divergence, and flag every
+    -- previously-applied edit "source changed" forever — and the stale drift
+    -- markers would read our write as external change on the next focus event.
+    local applied_any = false
+    for _, filename in ipairs(order) do
+      local vfile = st.view.files_by_name[filename]
+      local edits = {}
+      for _, p in ipairs(by_file[filename].plans) do
+        if p.applied then
+          applied_any = true
+          edits[#edits + 1] = {
+            l0 = p.l0,
+            oldcount = math.max(0, p.l1 - p.l0 + 1),
+            newcount = #p.newlines,
+          }
+        end
+      end
+      if vfile and #edits > 0 then
+        model.shift_file(vfile, edits)
+      end
+    end
+    if applied_any then
+      render.rebase_partial(buf, all_plans)
+    end
     vim.bo[buf].modified = true
   end
 
@@ -325,6 +394,10 @@ function M.save(buf)
   if unmappable > 0 then
     notes[#notes + 1] = unmappable .. ' skipped (unmappable)'
     level = vim.log.levels.WARN
+  end
+  if write_failed > 0 then
+    notes[#notes + 1] = write_failed .. ' file(s) failed to write'
+    level = vim.log.levels.ERROR
   end
   if #notes > 0 then
     msg = msg .. ' — ' .. table.concat(notes, ', ')
