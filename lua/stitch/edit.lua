@@ -24,9 +24,12 @@ local warn_ns = vim.api.nvim_create_namespace('stitch_warn')
 
 vim.api.nvim_set_hl(0, 'StitchDivergent', { link = 'WarningMsg', default = true })
 
--- Load (without focusing) the buffer backing `filename`. set_lines needs a
--- loaded buffer; loading also reads the current on-disk state so the divergence
--- guard sees external changes.
+-- Load (without focusing) the buffer backing `filename`; set_lines needs a loaded
+-- buffer. Loading an *unloaded* buffer reads the current on-disk state, so the
+-- divergence guard sees external changes. An already-loaded buffer is NOT re-read
+-- here: if it drifted on disk without being reloaded, source_intact compares
+-- against stale in-memory text and Neovim's write-time overwrite prompt is the
+-- backstop (the buffer's own focus autoread/checktime reloads it otherwise).
 local function ensure_loaded(filename, bufnr)
   if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
     if not vim.api.nvim_buf_is_loaded(bufnr) then

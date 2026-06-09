@@ -61,6 +61,11 @@ setup_highlights()
 -- :colorscheme clears user-added groups, so re-resolve the header colours after.
 vim.api.nvim_create_autocmd('ColorScheme', { callback = setup_highlights })
 
+-- A wide invariant pad that fills the header background bar to the window edge
+-- (nowrap + trunc clip the overflow). Hoisted out of header_bar so it isn't
+-- re-allocated for every header on every decorate.
+local HEADER_PAD = string.rep(' ', 400)
+
 -- Header as inline-virt-text chunks on the background bar: the directory dimmed
 -- and the file name bold, so it reads as a label rather than blending into code.
 local function header_chunks(relname)
@@ -81,7 +86,7 @@ end
 -- clipped to the window width.
 local function header_bar(relname)
   local chunks = header_chunks(relname)
-  chunks[#chunks + 1] = { string.rep(' ', 400), 'StitchHeaderBg' }
+  chunks[#chunks + 1] = { HEADER_PAD, 'StitchHeaderBg' }
   return chunks
 end
 
@@ -96,13 +101,14 @@ local function unique_name(title)
   return name
 end
 
-local function file_header(relname, is_first)
-  local lines = {}
-  if not is_first then
-    lines[#lines + 1] = { { '', 'StitchSeparator' } }
-  end
-  lines[#lines + 1] = header_bar(relname)
-  return lines
+-- A blank separator line above the header bar, marking the start of a file. Only
+-- the second-and-later files reach here: the first file's header rides the row-0
+-- spacer via an overlay extmark (see decorate), so the separator is always wanted.
+local function file_header(relname)
+  return {
+    { { '', 'StitchSeparator' } },
+    header_bar(relname),
+  }
 end
 
 -- Divider shown between two non-adjacent blocks of the same file: a dim `⋮` in
@@ -361,7 +367,7 @@ local function decorate(buf, st, rows)
         end
         vim.api.nvim_buf_set_extmark(buf, ns, hrow, 0, {
           right_gravity = false,
-          virt_lines = file_header(info.relname, b.is_first_file),
+          virt_lines = file_header(info.relname),
           virt_lines_above = true,
           virt_lines_overflow = 'trunc', -- clip the bar's pad to the window width
         })

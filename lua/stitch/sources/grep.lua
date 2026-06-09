@@ -17,45 +17,46 @@ function M.run(pattern, present)
     return
   end
 
-  local result = vim.system({ 'rg', '--json', '--', pattern }, { text = true }):wait()
+  -- Run ripgrep async so a large repo doesn't freeze the UI while it scans.
+  vim.system({ 'rg', '--json', '--', pattern }, { text = true }, vim.schedule_wrap(function(result)
+    if result.code == 2 then
+      vim.notify('stitches: ripgrep error\n' .. (result.stderr or ''), vim.log.levels.ERROR)
+      return
+    end
 
-  if result.code == 2 then
-    vim.notify('stitches: ripgrep error\n' .. (result.stderr or ''), vim.log.levels.ERROR)
-    return
-  end
-
-  -- rg --json emits one JSON object per line. Each "match" carries the line text
-  -- and the byte offsets of every submatch on that line, which become the exact
-  -- highlight span (col..end_col) for each quickfix item.
-  local items = {}
-  for _, line in ipairs(vim.split(result.stdout or '', '\n', { trimempty = true })) do
-    local ok, obj = pcall(vim.json.decode, line)
-    if ok and type(obj) == 'table' and obj.type == 'match' then
-      local data = obj.data
-      local path = data.path and data.path.text
-      local text = data.lines and data.lines.text
-      local lnum = data.line_number
-      if path and text and lnum then
-        text = text:gsub('\n$', '')
-        for _, sm in ipairs(data.submatches or {}) do
-          items[#items + 1] = {
-            filename = path,
-            lnum = lnum,
-            col = sm.start + 1,
-            end_col = sm['end'] + 1, -- 'end' is a Lua keyword
-            text = text,
-          }
+    -- rg --json emits one JSON object per line. Each "match" carries the line text
+    -- and the byte offsets of every submatch on that line, which become the exact
+    -- highlight span (col..end_col) for each quickfix item.
+    local items = {}
+    for _, line in ipairs(vim.split(result.stdout or '', '\n', { trimempty = true })) do
+      local ok, obj = pcall(vim.json.decode, line)
+      if ok and type(obj) == 'table' and obj.type == 'match' then
+        local data = obj.data
+        local path = data.path and data.path.text
+        local text = data.lines and data.lines.text
+        local lnum = data.line_number
+        if path and text and lnum then
+          text = text:gsub('\n$', '')
+          for _, sm in ipairs(data.submatches or {}) do
+            items[#items + 1] = {
+              filename = path,
+              lnum = lnum,
+              col = sm.start + 1,
+              end_col = sm['end'] + 1, -- 'end' is a Lua keyword
+              text = text,
+            }
+          end
         end
       end
     end
-  end
 
-  if #items == 0 then
-    vim.notify('stitches: no matches for ' .. pattern, vim.log.levels.WARN)
-    return
-  end
+    if #items == 0 then
+      vim.notify('stitches: no matches for ' .. pattern, vim.log.levels.WARN)
+      return
+    end
 
-  present(items, 'grep: ' .. pattern)
+    present(items, 'grep: ' .. pattern)
+  end))
 end
 
 return M

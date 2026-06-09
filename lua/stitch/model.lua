@@ -177,7 +177,11 @@ function M.shift_file(file, edits, pin_new)
   local nlevels = file.levels and {} or nil
   for _, ml in ipairs(file.match_lnums) do
     local nl = shift(ml)
-    if nl then
+    -- When an edit collapses a region that held 2+ matches, they all snap to the
+    -- region's new start (the shift() snap branch). Keep the first and drop the
+    -- rest so match_lnums stays duplicate-free and the surviving record isn't
+    -- silently overwritten last-wins.
+    if nl and nmatches[nl] == nil then
       nl_list[#nl_list + 1] = nl
       nmatches[nl] = file.matches[ml]
       if nlevels then

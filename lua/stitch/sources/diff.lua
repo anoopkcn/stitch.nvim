@@ -32,14 +32,35 @@ local function resolve(revspec)
   if vim.fn.executable('git') == 1 then
     local rp = vim.system({ 'git', 'rev-parse', '--show-toplevel' }, { text = true }):wait()
     if rp.code == 0 then
-      local argv =
-        { 'git', 'diff', '--no-color', '--no-ext-diff', '-U0', '--src-prefix=a/', '--dst-prefix=b/' }
+      -- core.quotePath=false keeps non-ASCII paths raw (UTF-8) in the +++ header
+      -- instead of octal-escaped inside quotes, which the parser couldn't unwrap.
+      local argv = {
+        'git', '-c', 'core.quotePath=false', 'diff',
+        '--no-color', '--no-ext-diff', '-U0', '--src-prefix=a/', '--dst-prefix=b/',
+      }
       argv[#argv + 1] = has_rev and revspec or 'HEAD'
       return argv, vim.trim(rp.stdout or '')
     end
   end
 
   return nil
+end
+
+-- Decode a git C-quoted path ("..." with \ooo octal + \t\n\r\"\\ escapes). With
+-- core.quotePath=false this only fires for names with a literal quote/backslash or
+-- control char; without it, non-ASCII names would resolve to a bogus path.
+local function git_unquote(path)
+  if path:sub(1, 1) == '"' and path:sub(-1) == '"' then
+    path = path
+      :sub(2, -2)
+      :gsub('\\([0-7][0-7][0-7])', function(o)
+        return string.char(tonumber(o, 8))
+      end)
+      :gsub('\\([tnr"\\])', function(c)
+        return ({ t = '\t', n = '\n', r = '\r', ['"'] = '"', ['\\'] = '\\' })[c]
+      end)
+  end
+  return path
 end
 
 -- Parse a git-format unified diff into one item per added/modified line, with its
@@ -50,12 +71,16 @@ local function parse(text, root)
   for _, line in ipairs(vim.split(text or '', '\n', { plain = true })) do
     if line:sub(1, 11) == 'diff --git ' then
       file, lnum = nil, nil
-    elseif line:sub(1, 4) == '+++ ' then
-      local path = line:sub(5)
+    elseif line:sub(1, 4) == '+++ ' and not lnum then
+      -- The +++ b/<path> header only appears before the first @@ (lnum still nil).
+      -- Inside a hunk, '+++ x' is an added line whose content begins with '++ ' —
+      -- gating on `not lnum` keeps that content from being misread as a header.
+      -- git appends a trailing tab to the header when the path contains a space.
+      local path = line:sub(5):gsub('\t$', '')
       if path == '/dev/null' then
         file = nil -- deleted file: nothing in the working tree to show
       else
-        file = root .. '/' .. path:gsub('^b/', '')
+        file = root .. '/' .. git_unquote(path):gsub('^b/', '')
       end
     elseif line:sub(1, 2) == '@@' then
       lnum = tonumber(line:match('^@@ %-[%d,]+ %+(%d+)'))
@@ -82,20 +107,23 @@ function M.run(revspec, present)
     return
   end
 
-  local result = vim.system(argv, { text = true }):wait()
-  if result.code ~= 0 then
-    vim.notify('stitches: ' .. argv[1] .. ' diff failed\n' .. (result.stderr or ''), vim.log.levels.ERROR)
-    return
-  end
+  -- Run the diff async so a large working tree doesn't freeze the UI; the cheap
+  -- VCS-detection probes in resolve() already ran synchronously.
+  vim.system(argv, { text = true }, vim.schedule_wrap(function(result)
+    if result.code ~= 0 then
+      vim.notify('stitches: ' .. argv[1] .. ' diff failed\n' .. (result.stderr or ''), vim.log.levels.ERROR)
+      return
+    end
 
-  local items = parse(result.stdout, root)
-  if #items == 0 then
-    vim.notify('stitches: no changes to show', vim.log.levels.WARN)
-    return
-  end
+    local items = parse(result.stdout, root)
+    if #items == 0 then
+      vim.notify('stitches: no changes to show', vim.log.levels.WARN)
+      return
+    end
 
-  local title = (revspec and revspec ~= '') and ('diff: ' .. revspec) or 'diff'
-  present(items, title)
+    local title = (revspec and revspec ~= '') and ('diff: ' .. revspec) or 'diff'
+    present(items, title)
+  end))
 end
 
 return M
