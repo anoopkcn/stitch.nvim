@@ -289,13 +289,20 @@ Within a file, overlapping or adjacent context blocks are merged into one,
 and a gap between two blocks of the same file is shown as a `⋮` divider (the
 jump in line numbers indicates how many lines it spans).
 
+`context` only sets the *initial* extent of each block. From then on the
+visible range is stable content, not a radius around the match: saving an
+inserted line grows the block by that line (nothing else slides out of
+view), deleting a line shrinks it (no previously-hidden line slides in),
+and deleting the gap between two blocks joins them.
+
 Interactive expand/collapse~
 
-Press `+` / `-` (see |stitch-mappings|) to grow or shrink the context around
-the stitch under the cursor by |stitch-context-step| lines, or a count:
-`10+`. Expanding raises the context level of every match in the block under
-the cursor; expanding far enough merges neighbouring stitches, and collapsing
-splits them back.
+Press `+` / `-` (see |stitch-mappings|) to widen or narrow the block under
+the cursor by |stitch-context-step| lines per end, or a count: `10+`.
+Expanding far enough merges it with the neighbouring block. Collapsing stops
+at the block's matches — match lines never vanish from the view, and the
+lines between two matches of a merged block stay visible. A block whose
+match lines were edited away can be collapsed until it disappears.
 
 Because expand/collapse re-lays-out the anchored lines, it resets the buffer's
 undo history:
@@ -371,9 +378,11 @@ context~
     Type: integer
     Default: 1
 
-Number of source lines to show above and below each match. 0 shows just the
-match line. Context lines are editable, jumpable, and highlighted like
-matches. See |stitch-context-lines|.
+Number of source lines initially shown above and below each match. 0 shows
+just the match line. Context lines are editable, jumpable, and highlighted
+like matches. After opening, each block's visible range is stable content
+that follows your edits rather than a fixed radius — see
+|stitch-context-lines|.
 
 ------------------------------------------------------------------------------
                                                     *stitch-context-step*

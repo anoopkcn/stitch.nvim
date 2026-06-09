@@ -14,7 +14,7 @@
 --
 -- Invariants the module maintains so callers never have to:
 --   * snapshot[i] == origin[i].source for every mapped row
---   * origin line numbers, the view model (match_lnums/levels/pinned/
+--   * origin line numbers, the view model (matches, visible ranges,
 --     line_count via model.shift_file), and sync_lines all use the same
 --     source coordinates — every advance moves them together
 --   * `gen` increments whenever the baseline moves without a buffer edit
@@ -152,9 +152,10 @@ end
 -- ---------------------------------------------------------------------------
 -- Advance after write-back
 
--- Shift the view model (match_lnums, levels, pinned, line_count) by the
--- applied plans, file by file, so the next materialize agrees with the source
--- we just wrote.
+-- Shift the view model (matches, visible ranges, line_count) by the applied
+-- plans, file by file, so the next materialize agrees with the source we just
+-- wrote — inserted lines grow their range, deletions shrink it, and the next
+-- repaint shows exactly what the user's edit implied.
 function B:shift_model(applied)
   local by_file = {}
   for _, p in ipairs(applied) do
@@ -350,8 +351,9 @@ function B:drift()
 end
 
 --- Rebase the view model for externally drifted files (matches follow their
---- source; matches on deleted lines drop). Foreign edits are not pinned into
---- the view. The caller repaints afterwards, which resets the baseline.
+--- source; matches on deleted lines drop; ranges move content-anchored, but
+--- foreign boundary insertions don't grow the view). The caller repaints
+--- afterwards, which resets the baseline.
 function B:absorb(diverged)
   for _, d in ipairs(diverged) do
     model.shift_file(d.file, d.edits, false)

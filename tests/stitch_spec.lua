@@ -234,6 +234,65 @@ model.read_lines = orig_read
 check('H1: repaint reads each file exactly once', reads == 1, reads)
 
 ------------------------------------------------------------------
+-- Scenario I: persistent ranges — edits grow/shrink the view, never slide it
+------------------------------------------------------------------
+config.setup({ context = 1, window = 'split', highlight = false })
+vim.cmd('only')
+vim.cmd('enew')
+local fileI2 = mkfile('i2.txt', 'I')
+local bufI2 = open_view(fileI2) -- matches 3 & 9, context 1: src 2-4 and 8-10
+local winI2 = vim.api.nvim_get_current_win()
+local function buf_lines()
+  return vim.api.nvim_buf_get_lines(bufI2, 0, -1, false)
+end
+
+-- Insert a line inside the first block and save: the view must GROW — the
+-- displaced neighbour ('I line 4') stays visible alongside the new line.
+vim.api.nvim_buf_set_lines(bufI2, 3, 3, false, { 'NEW' })
+notes = {}
+edit.save(bufI2)
+check('I1: insert grows the block — displaced neighbour stays visible',
+  vim.deep_equal(buf_lines(),
+    { '', 'I line 2', 'I line 3', 'NEW', 'I line 4', 'I line 8', 'I line 9', 'I line 10' }),
+  buf_lines())
+
+-- Delete a context line and save: the view must SHRINK — the previously
+-- hidden 'I line 1' must not be revealed.
+vim.api.nvim_buf_set_lines(bufI2, 1, 2, false, {})
+notes = {}
+edit.save(bufI2)
+check('I2: delete shrinks the block — no hidden line revealed',
+  vim.deep_equal(buf_lines(),
+    { '', 'I line 3', 'NEW', 'I line 4', 'I line 8', 'I line 9', 'I line 10' }),
+  buf_lines())
+
+-- Collapse floors at the block's matches: two steps reach the match line,
+-- a third changes nothing.
+local ctx = require('stitch.context')
+vim.api.nvim_win_set_cursor(winI2, { 2, 0 })
+ctx.collapse(bufI2)
+vim.api.nvim_win_set_cursor(winI2, { 2, 0 })
+ctx.collapse(bufI2)
+check('I3: collapse reaches the match hull',
+  vim.deep_equal(buf_lines(),
+    { '', 'I line 3', 'I line 8', 'I line 9', 'I line 10' }),
+  buf_lines())
+vim.api.nvim_win_set_cursor(winI2, { 2, 0 })
+ctx.collapse(bufI2)
+check('I3: further collapse is a no-op at the hull',
+  vim.deep_equal(buf_lines(),
+    { '', 'I line 3', 'I line 8', 'I line 9', 'I line 10' }),
+  buf_lines())
+
+-- Expand widens the range again.
+vim.api.nvim_win_set_cursor(winI2, { 2, 0 })
+ctx.expand(bufI2)
+check('I4: expand widens the block',
+  vim.deep_equal(buf_lines(),
+    { '', 'I line 1', 'I line 3', 'NEW', 'I line 8', 'I line 9', 'I line 10' }),
+  buf_lines())
+
+------------------------------------------------------------------
 print(table.concat(results, '\n'))
 print(failed == 0 and 'ALL PASS' or (failed .. ' FAILURE(S)'))
 if failed > 0 then os.exit(1) end

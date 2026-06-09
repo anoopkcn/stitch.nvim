@@ -2,9 +2,14 @@
 --   { title, files = { { filename, relname, bufnr, line_count,
 --       match_lnums = sorted, matches = { lnum -> { col, qftext, spans } } } } }
 --
--- The source model carries no layout. `blocks_from_levels` + `materialize` turn
--- it into displayable blocks for a given per-match context level, so the view
--- can be re-laid-out interactively (expand/collapse) without re-querying.
+-- The view then adds `ranges` to each file (ranges_from_matches): the visible
+-- source spans, kept as *persistent view state*. They are created from
+-- match ± context once, at open — and from then on only ever *moved*: source
+-- edits shift them content-anchored (shift_file: an insertion inside a range
+-- grows it, a deletion shrinks it), expand/collapse widens or narrows them.
+-- They are never re-derived around the matches, so a structural edit can't
+-- slide previously-visible lines out of view or surprise-reveal hidden ones.
+-- `materialize` turns the ranges into displayable blocks.
 local M = {}
 
 local function read_lines(filename, bufnr)
@@ -31,63 +36,61 @@ local function resolve_filename(item)
   return nil
 end
 
---- Expand each match by its own context level, add each pinned line as a unit
---- range (lines the user inserted/edited, kept visible at any context), clamp to
---- the file, and merge overlapping/adjacent ranges. Returns a list of { s, e }
---- (inclusive, 1-based).
---- @param match_lnums integer[] sorted match line numbers
---- @param levels table<integer,integer> lnum -> context level
---- @param line_count integer
---- @param pinned table<integer,true>|nil lnums to always show (zero context)
-function M.blocks_from_levels(match_lnums, levels, line_count, pinned)
-  local ranges = {}
-  for _, ml in ipairs(match_lnums) do
-    local n = levels[ml] or 0
-    local s = math.max(1, ml - n)
-    local e = math.min(line_count, ml + n)
-    if s <= e then
-      ranges[#ranges + 1] = { s = s, e = e }
-    end
-  end
-  if pinned then
-    for lnum in pairs(pinned) do
-      if lnum >= 1 and lnum <= line_count then
-        ranges[#ranges + 1] = { s = lnum, e = lnum }
-      end
-    end
-  end
-  -- Matches arrive sorted but pinned lines interleave, so sort before merging.
+--- Sort and merge overlapping/adjacent ranges into a fresh list. Adjacent
+--- ranges ({2,5} and {6,9}) merge too — their lines are contiguous, so they
+--- are one block — which keeps the invariant that distinct ranges are
+--- separated by at least one hidden line (range edits stay unambiguous).
+function M.merge_ranges(ranges)
   table.sort(ranges, function(a, b)
     if a.s ~= b.s then
       return a.s < b.s
     end
     return a.e < b.e
   end)
-  local blocks = {}
+  local out = {}
   for _, r in ipairs(ranges) do
-    local last = blocks[#blocks]
+    local last = out[#out]
     if last and r.s <= last.e + 1 then
       last.e = math.max(last.e, r.e)
     else
-      blocks[#blocks + 1] = { s = r.s, e = r.e }
+      out[#out + 1] = { s = r.s, e = r.e }
     end
   end
-  return blocks
+  return out
 end
 
---- Materialize a file's blocks for the given levels: read source and build the
---- per-line records the renderer paints.
---- @param file_src table source-model entry
---- @param levels table<integer,integer>
+--- A file's initial visible ranges: each match expanded by `context` lines,
+--- clamped to the file, merged. Called once when the view opens; from then on
+--- the ranges are persistent view state, moved by shift_file and
+--- expand/collapse but never re-derived from the matches.
+--- @param match_lnums integer[] sorted match line numbers
+--- @param context integer lines shown above/below each match
+--- @param line_count integer
+function M.ranges_from_matches(match_lnums, context, line_count)
+  local ranges = {}
+  for _, ml in ipairs(match_lnums) do
+    local s = math.max(1, ml - context)
+    local e = math.min(line_count, ml + context)
+    if s <= e then
+      ranges[#ranges + 1] = { s = s, e = e }
+    end
+  end
+  return M.merge_ranges(ranges)
+end
+
+--- Materialize a file's visible ranges: read source and build the per-line
+--- records the renderer paints.
+--- @param file_src table source-model entry (with .ranges)
 --- @param lines string[]|nil pre-read source lines (saves a re-read when the
 ---        caller also needs them, e.g. paint's drift baseline)
 --- @return table[] blocks  { { lines = { {lnum,source,is_match,col,annotation,spans} } } }
-function M.materialize(file_src, levels, lines)
+function M.materialize(file_src, lines)
   lines = lines or read_lines(file_src.filename, file_src.bufnr)
   local blocks = {}
-  for _, range in ipairs(M.blocks_from_levels(file_src.match_lnums, levels, file_src.line_count, file_src.pinned)) do
+  for _, range in ipairs(file_src.ranges or {}) do
     local block_lines = {}
-    for lnum = range.s, range.e do
+    -- Clamp defensively; shift_file keeps ranges within the file.
+    for lnum = math.max(1, range.s), math.min(range.e, #lines) do
       local match = file_src.matches[lnum]
       local src = lines[lnum] or ''
       local annotation
@@ -106,7 +109,9 @@ function M.materialize(file_src, levels, lines)
         spans = match and #match.spans > 0 and match.spans or nil,
       }
     end
-    blocks[#blocks + 1] = { lines = block_lines }
+    if #block_lines > 0 then
+      blocks[#blocks + 1] = { lines = block_lines }
+    end
   end
   return blocks
 end
@@ -138,23 +143,77 @@ function M.diff_to_edits(old_lines, new_lines)
   return edits
 end
 
---- Re-base a file's match line numbers after its source changed. Each edit is
+-- Move one visible range through `edits` (sorted ascending, original
+-- coordinates), content-anchored:
+--   * an edit entirely above shifts the whole range by its net delta
+--   * an insertion inside grows the range — nothing slides out of view; with
+--     `grow` (our own write-back) an insertion at the range's very edge
+--     (prepended at its first line, appended after its last) joins it too,
+--     so a line the user opened at a block boundary stays visible. An
+--     external-drift rebase passes grow=false: foreign boundary insertions
+--     shift the range instead of forcing themselves into the view (interior
+--     foreign insertions still show — their neighbours are visible).
+--   * a replacement/deletion overlapping the range snaps the overlapped
+--     endpoints to the replacement (covering all its new lines); a deletion
+--     strictly inside just shrinks it — nothing hidden slides in.
+-- Returns the new { s, e }, or nil when every line of the range was deleted.
+-- Accumulates endpoint deltas against original coordinates (edits are
+-- disjoint and ascending), so later edits never see half-shifted positions.
+local function shift_range(r, edits, grow)
+  local s, e = r.s, r.e -- original coordinates, compared against edit positions
+  local add_s, add_e = 0, 0 -- accumulated shifts for each endpoint
+  local snap_s, snap_e -- absolute overrides (already in new coordinates)
+  for _, ed in ipairs(edits) do
+    if ed.oldcount == 0 then
+      local p = ed.l0 -- insertion lands before original line p
+      local joins = grow and (p >= s and p <= e + 1) or (p > s and p <= e)
+      if joins then
+        add_e = add_e + ed.newcount
+      elseif p <= s then
+        add_s = add_s + ed.newcount
+        add_e = add_e + ed.newcount
+      end
+    else
+      local last = ed.l0 + ed.oldcount - 1
+      local n = ed.newcount - ed.oldcount
+      if last < s then
+        add_s = add_s + n
+        add_e = add_e + n
+      elseif ed.l0 <= e then -- the edited region overlaps the range
+        if ed.l0 <= s then
+          snap_s = ed.l0 + add_s -- top overlapped: start at the replacement
+        end
+        if last >= e then
+          snap_e = ed.l0 + add_e + ed.newcount - 1 -- bottom overlapped: cover it
+        else
+          add_e = add_e + n -- strictly interior: net growth/shrink
+        end
+      end
+    end
+  end
+  local ns = snap_s or (s + add_s)
+  local ne = snap_e or (e + add_e)
+  if ne < ns then
+    return nil -- the whole range was deleted
+  end
+  return { s = ns, e = ne }
+end
+
+--- Re-base a file's view state after its source changed. Each edit is
 --- { l0, oldcount, newcount }: source lines [l0, l0+oldcount-1] (1-based) were
---- replaced by `newcount` lines (oldcount=0 ⇒ pure insertion at l0). Matches on
---- deleted lines are dropped; matches below an edit shift by the net line delta.
---- When `pin_new` (default true) the newly written lines of each edit are pinned
---- so they stay visible after the repaint (they aren't matches and context 0
---- wouldn't show them) — write-back wants this for lines the user added; an
---- external-drift rebase passes false so foreign edits don't force themselves
---- into the view. Existing pins are rebased the same way matches are. Keeps
---- match_lnums, matches, pinned, line_count, and (if present) levels consistent so
---- a repaint from the now-current source is correct.
---- @param file table view file (match_lnums, matches, levels?, pinned?, line_count)
+--- replaced by `newcount` lines (oldcount=0 ⇒ pure insertion at l0). Matches
+--- on deleted lines are dropped; matches below an edit shift by the net line
+--- delta. The visible ranges move content-anchored (see shift_range): an
+--- insertion grows the range it lands in, a deletion shrinks it, and ranges
+--- whose gap was deleted merge into one block — so what the user sees changes
+--- by exactly what the edit did, never by re-centering around the matches.
+--- @param file table view file (match_lnums, matches, ranges, line_count)
 --- @param edits table[]
---- @param pin_new boolean|nil pin each edit's new lines (default true)
-function M.shift_file(file, edits, pin_new)
-  if pin_new == nil then
-    pin_new = true
+--- @param grow boolean|nil boundary insertions join their range (default
+---        true, for our own write-back; drift rebases pass false)
+function M.shift_file(file, edits, grow)
+  if grow == nil then
+    grow = true
   end
   table.sort(edits, function(a, b)
     return a.l0 < b.l0
@@ -176,7 +235,6 @@ function M.shift_file(file, edits, pin_new)
   end
 
   local nl_list, nmatches = {}, {}
-  local nlevels = file.levels and {} or nil
   for _, ml in ipairs(file.match_lnums) do
     local nl = shift(ml)
     -- When an edit collapses a region that held 2+ matches, they all snap to the
@@ -186,41 +244,24 @@ function M.shift_file(file, edits, pin_new)
     if nl and nmatches[nl] == nil then
       nl_list[#nl_list + 1] = nl
       nmatches[nl] = file.matches[ml]
-      if nlevels then
-        nlevels[nl] = file.levels[ml]
-      end
     end
   end
   file.match_lnums = nl_list
   file.matches = nmatches
-  if nlevels then
-    file.levels = nlevels
-  end
 
-  -- Rebase existing pins (real lines that moved), then pin each edit's newly
-  -- written region. The region starts at `l0` shifted only by the edits *above*
-  -- it (a running delta) — not shift(l0), which would land on the displaced line
-  -- after the region. delta ends at the net line change for line_count below.
-  local npinned = {}
-  if file.pinned then
-    for lnum in pairs(file.pinned) do
-      local nl = shift(lnum)
-      if nl then
-        npinned[nl] = true
-      end
+  local nranges = {}
+  for _, r in ipairs(file.ranges or {}) do
+    local nr = shift_range(r, edits, grow)
+    if nr then
+      nranges[#nranges + 1] = nr
     end
   end
+  file.ranges = M.merge_ranges(nranges)
+
   local delta = 0
   for _, e in ipairs(edits) do
-    if pin_new then
-      local new_start = e.l0 + delta
-      for l = new_start, new_start + e.newcount - 1 do
-        npinned[l] = true
-      end
-    end
     delta = delta + (e.newcount - e.oldcount)
   end
-  file.pinned = npinned
   file.line_count = math.max(0, file.line_count + delta)
 end
 

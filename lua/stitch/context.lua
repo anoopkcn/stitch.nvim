@@ -1,8 +1,13 @@
--- Interactive expand/collapse of the context around the stitch under the cursor.
+-- Interactive expand/collapse of the block under the cursor.
 --
--- Each match carries a per-match context level (lines shown above/below). Expand
--- raises the level of every match in the block under the cursor; collapse lowers
--- it (floor 0). The view is then repainted from the mutated levels.
+-- Blocks are the file's persistent visible ranges (model.lua): expand widens
+-- the range under the cursor by `step` lines on each end (merging into a
+-- neighbouring range it reaches); collapse narrows it, stopping at the hull
+-- of the block's matches — the match lines never vanish out from under the
+-- cursor, and interior lines of a merged block stay until the view is closed.
+-- A range whose matches were all deleted (its match lines were edited away)
+-- has no hull and collapses away entirely. The view is then repainted from
+-- the mutated ranges.
 local config = require('stitch.config')
 local render = require('stitch.render')
 local model = require('stitch.model')
@@ -45,43 +50,59 @@ local function adjust(buf, count, sign)
     return
   end
 
-  -- Find the block currently containing the cursor's source line.
-  local blocks = model.blocks_from_levels(file.match_lnums, file.levels, file.line_count, file.pinned)
-  local block
-  for _, b in ipairs(blocks) do
-    if rec.lnum >= b.s and rec.lnum <= b.e then
-      block = b
+  -- The range currently containing the cursor's source line.
+  local idx, range
+  for i, r in ipairs(file.ranges) do
+    if rec.lnum >= r.s and rec.lnum <= r.e then
+      idx, range = i, r
       break
     end
   end
-  if not block then
+  if not range then
     return
   end
 
   local step = (count and count > 0) and count or (config.options.context_step or 1)
-  local changed = false
-  for _, ml in ipairs(file.match_lnums) do
-    if ml >= block.s and ml <= block.e then
-      local cur = file.levels[ml] or 0
-      local new = sign > 0 and (cur + step) or math.max(0, cur - step)
-      if new ~= cur then
-        file.levels[ml] = new
-        changed = true
+  local old_s, old_e, removed = range.s, range.e, false
+
+  if sign > 0 then
+    range.s = math.max(1, range.s - step)
+    range.e = math.min(file.line_count, range.e + step)
+    -- Growing can reach the neighbouring range; restore the merged invariant.
+    file.ranges = model.merge_ranges(file.ranges)
+  else
+    -- The hull of the matches still inside this range: collapse stops there.
+    local lo, hi
+    for _, ml in ipairs(file.match_lnums) do -- sorted ascending
+      if ml >= range.s and ml <= range.e then
+        lo = lo or ml
+        hi = ml
+      end
+    end
+    if lo then
+      range.s = math.min(range.s + step, lo)
+      range.e = math.max(range.e - step, hi)
+    else
+      range.s = range.s + step
+      range.e = range.e - step
+      if range.s > range.e then
+        table.remove(file.ranges, idx)
+        removed = true
       end
     end
   end
 
-  if changed then
+  if removed or range.s ~= old_s or range.e ~= old_e then
     render.repaint(buf)
   end
 end
 
---- Show more context around the stitch under the cursor.
+--- Show more context around the block under the cursor.
 function M.expand(buf, count)
   adjust(buf, count, 1)
 end
 
---- Show less context around the stitch under the cursor.
+--- Show less context around the block under the cursor.
 function M.collapse(buf, count)
   adjust(buf, count, -1)
 end

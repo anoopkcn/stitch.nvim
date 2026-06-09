@@ -22,7 +22,7 @@ local ns = vim.api.nvim_create_namespace('stitch')
 
 -- bufnr -> {
 --   marks    = { [extmark_id] = { filename, bufnr, lnum, col, source } },
---   view     = { title, files = { source-model file + .levels }, files_by_name },
+--   view     = { title, files = { source-model file + .ranges }, files_by_name },
 --   baseline = stitch.baseline object: snapshot/origin/live diff/drift markers
 -- }
 M.state = {}
@@ -210,7 +210,7 @@ function M.close(buf)
   end
 end
 
--- Flatten the live view (each file materialized for its current levels) into
+-- Flatten the live view (each file materialized for its visible ranges) into
 -- buffer lines + per-row infos. Row 0 is a blank spacer: Neovim does not render
 -- virt_lines *above* line 0, so reserving it keeps the first file header visible.
 local function build_infos(st)
@@ -222,7 +222,7 @@ local function build_infos(st)
   for fi, f in ipairs(st.view.files) do
     local src_lines = model.read_lines(f.filename, f.bufnr)
     src_by_file[f.filename] = src_lines
-    local blocks = model.materialize(f, f.levels, src_lines)
+    local blocks = model.materialize(f, src_lines)
     for bi, block in ipairs(blocks) do
       for li, line in ipairs(block.lines) do
         local row = #lines
@@ -530,7 +530,7 @@ function M.sync(buf)
   local win = vim.api.nvim_get_current_win()
   local saved = (vim.api.nvim_win_get_buf(win) == buf) and vim.fn.winsaveview() or nil
   local ok, err = pcall(function()
-    st.baseline:absorb(diverged) -- rebase the model; foreign edits aren't pinned
+    st.baseline:absorb(diverged) -- rebase the model (foreign boundary inserts stay hidden)
     paint(buf, st) -- repaints and resets the baseline (drift markers included)
   end)
   -- Always clear the guard: a paint that threw must not wedge sync off for the
@@ -552,14 +552,13 @@ function M.open(source)
   local st = { marks = {} }
   M.state[buf] = st
 
-  -- Live view state, mutated by expand/collapse and re-read on repaint.
+  -- Live view state, mutated by expand/collapse and re-read on repaint. The
+  -- visible ranges are derived from the matches exactly once, here; from then
+  -- on they only ever *move* (with source edits, or via expand/collapse), so
+  -- content never slides in or out of view when line numbers shift.
   local files, by_name = {}, {}
   for _, f in ipairs(source.files) do
-    f.levels = {}
-    for _, ml in ipairs(f.match_lnums) do
-      f.levels[ml] = config.options.context or 1
-    end
-    f.pinned = {} -- lnums the user inserted/edited, kept visible at any context
+    f.ranges = model.ranges_from_matches(f.match_lnums, config.options.context or 1, f.line_count)
     files[#files + 1] = f
     by_name[f.filename] = f
   end

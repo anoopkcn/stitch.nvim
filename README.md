@@ -69,7 +69,7 @@ Defaults:
 require('stitch').setup({
   window = 'split',  -- 'split' | 'vsplit' | 'tab' | 'current'
   highlight = true,  -- project Treesitter syntax highlighting onto stitches
-  context = 1,       -- lines of source context shown above/below each match
+  context = 1,       -- initial source context lines above/below each match
   context_step = 1,  -- lines added/removed per +/- press (a count overrides it)
   max_results = 2000, -- cap on grep results (false disables the cap)
   keys = {
