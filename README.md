@@ -1,9 +1,13 @@
 # stitch.nvim
 
-View stitches from many files in a single buffer
+Stitches are portions of text belonging to a file.
 
-Populate one grouped view from a project search, LSP references, or diagnostics,
-read/edit and push changes back to the buffers, and jump straight to any source line.
+View 'stitches' from many files in a single buffer and edit them as if they belong to a single buffer.
+
+- stitches can be search results, diffs, LSP references, or diagnostics,
+- read/edit and push changes back to the buffers, and jump straight to any source line.
+
+![disply_img](https://github.com/user-attachments/assets/c7073180-f345-45d8-90d1-d9e4f9ae00dc)
 
 ## Requirements
 

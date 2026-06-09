@@ -55,7 +55,19 @@ local function setup_highlights()
   set('StitchContextLnum', { link = 'NonText' })
   set('StitchAnnotation', { link = 'Comment' })
   set('StitchSeparator', { link = 'NonText' })
-  set('StitchMatch', { underline = true, sp = '#61afef' })
+  -- Buffer-text highlights have no real alpha, so a "transparent" blue is faked
+  -- by blending the blue into the editor background at a low weight.
+  local function blend(fg, bg, alpha)
+    local function split(c)
+      return math.floor(c / 0x10000) % 0x100, math.floor(c / 0x100) % 0x100, c % 0x100
+    end
+    local fr, fg_, fb = split(fg)
+    local br, bg_, bb = split(bg)
+    local function mix(a, b) return math.floor(a * alpha + b * (1 - alpha) + 0.5) end
+    return string.format('#%02x%02x%02x', mix(fr, br), mix(fg_, bg_), mix(fb, bb))
+  end
+  local nbg = attr('Normal', 'bg') or (vim.o.background == 'light' and 0xffffff or 0x000000)
+  set('StitchMatch', { bg = blend(0x61afef, nbg, 0.40) })
 end
 setup_highlights()
 -- :colorscheme clears user-added groups, so re-resolve the header colours after.
