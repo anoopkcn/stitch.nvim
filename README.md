@@ -68,8 +68,8 @@ Defaults:
 require('stitch').setup({
   window = 'split',  -- 'split' | 'vsplit' | 'tab' | 'current'
   highlight = true,  -- project Treesitter syntax highlighting onto stitches
-  context = 0,       -- lines of source context shown above/below each match
-  context_step = 4,  -- lines added/removed per +/- press (a count overrides it)
+  context = 1,       -- lines of source context shown above/below each match
+  context_step = 1,  -- lines added/removed per +/- press (a count overrides it)
   keys = {
     jump = '<CR>',
     close = 'q',

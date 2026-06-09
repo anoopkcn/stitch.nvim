@@ -686,7 +686,7 @@ function M.open(source)
   for _, f in ipairs(source.files) do
     f.levels = {}
     for _, ml in ipairs(f.match_lnums) do
-      f.levels[ml] = config.options.context or 0
+      f.levels[ml] = config.options.context or 1
     end
     f.pinned = {} -- lnums the user inserted/edited, kept visible at any context
     files[#files + 1] = f

@@ -331,8 +331,8 @@ Pass options to |stitch.setup()| (or to lazy.nvim's `opts`). Defaults: >
     require('stitch').setup({
       window = 'split',   -- 'split' | 'vsplit' | 'tab' | 'current'
       highlight = true,   -- project Treesitter highlighting onto stitches
-      context = 0,        -- source context lines above/below each match
-      context_step = 4,   -- lines added/removed per +/- press
+      context = 1,        -- source context lines above/below each match
+      context_step = 1,   -- lines added/removed per +/- press
       keys = {
         jump = '<CR>',
         close = 'q',
@@ -367,7 +367,7 @@ highlight (|StitchMatch|) is independent of this setting.
                                                          *stitch-context*
 context~
     Type: integer
-    Default: 0
+    Default: 1
 
 Number of source lines to show above and below each match. 0 shows just the
 match line. Context lines are editable, jumpable, and highlighted like
@@ -377,7 +377,7 @@ matches. See |stitch-context-lines|.
                                                     *stitch-context-step*
 context_step~
     Type: integer
-    Default: 4
+    Default: 1
 
 Lines added or removed per `+` / `-` press. A count on the mapping overrides
 it for that press (e.g. `10+` adds 10 lines regardless of this value).

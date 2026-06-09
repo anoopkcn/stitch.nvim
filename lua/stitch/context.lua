@@ -58,7 +58,7 @@ local function adjust(buf, count, sign)
     return
   end
 
-  local step = (count and count > 0) and count or (config.options.context_step or 4)
+  local step = (count and count > 0) and count or (config.options.context_step or 1)
   local changed = false
   for _, ml in ipairs(file.match_lnums) do
     if ml >= block.s and ml <= block.e then
