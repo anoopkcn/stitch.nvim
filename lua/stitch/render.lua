@@ -11,6 +11,7 @@ local config = require('stitch.config')
 local model = require('stitch.model')
 local reconcile = require('stitch.reconcile')
 local baseline = require('stitch.baseline')
+local viewwin = require('stitch.viewwin')
 local intent = require('stitch.intent')
 local srclang = require('stitch.lang')
 
@@ -179,76 +180,14 @@ local function block_divider()
   return { { { '', 'StitchSeparator' } } }
 end
 
--- Window-local view options stitch forces on its own view. The source
--- line-number gutter is a real `statuscolumn` (not inline virt_text), so it's a
--- genuine non-text column the cursor can never enter — the same as a normal
--- buffer's number column, and correct on empty/inserted lines where inline
--- virt_text would let the cursor render at screen column 0. These are
--- window-local, so they're reasserted whenever the buffer is shown in another
--- window (see open's BufWinEnter/WinEnter autocmd); otherwise a split would lose
--- the gutter. M.FORCED_WINOPTS is read by nav to know which options a jump must
--- restore on a window it splits off the stitch view.
-M.FORCED_WINOPTS = {
-  number = false,
-  relativenumber = false,
-  signcolumn = 'no',
-  wrap = false,
-  foldcolumn = '0',
-  list = false,
-  statuscolumn = "%!v:lua.require'stitch.render'.statuscol()",
-}
-
--- Scope 'local' is load-bearing: `vim.wo[win][opt] = v` behaves like `:set`,
--- writing the *global* default of these window options too — one stitch view
--- would leak the stitch gutter / nowrap / nonumber into every window created
--- afterwards, in any tab.
-local function apply_winopts(win)
-  for opt, val in pairs(M.FORCED_WINOPTS) do
-    vim.api.nvim_set_option_value(opt, val, { scope = 'local', win = win })
-  end
-end
-
--- Snapshot the to-be-forced options from a window, so a jump that has to split
--- off the stitch view can restore the user's real settings (the split would
--- otherwise inherit stitch's forced ones, e.g. losing line numbers).
-local function capture_winopts(win)
-  local saved = {}
-  for opt in pairs(M.FORCED_WINOPTS) do
-    saved[opt] = vim.wo[win][opt]
-  end
-  return saved
-end
-
---- Restore the forced options on a window that stops showing a stitch view —
---- a window split off by a jump, or one left behind when the view is wiped or
---- switched away from. `saved` is the snapshot open_window took of the user's
---- real settings; without it (shouldn't happen) fall back to the global value,
---- which at least clears the stitch statuscolumn. Explicit nil-check, not
---- `a and b or c`: a captured `false` (e.g. nowrap, nonumber) is a valid value
---- the ternary would wrongly drop to the global.
-function M.restore_winopts(win, saved)
-  for opt in pairs(M.FORCED_WINOPTS) do
-    local val = vim.go[opt]
-    if saved and saved[opt] ~= nil then
-      val = saved[opt]
-    end
-    vim.api.nvim_set_option_value(opt, val, { scope = 'local', win = win })
-  end
-end
-
+-- Open the view's window per config and hand the window-option lifecycle to
+-- stitch.viewwin: adopt() snapshots the user's real settings from the window
+-- we open *from* (before any split or buffer swap) and wires the
+-- reassert/restore autocmds; claim() forces the view options on the window
+-- that ends up showing it.
 local function open_window(buf)
   local mode = config.options.window
-  -- Capture the options of the window we open *from*, before forcing stitch's:
-  -- cursorline is inherited (keep it off if the user keeps it off), and the full
-  -- set is stashed so a later jump can hand a freshly-split window the user's
-  -- real settings instead of stitch's. Captured here, before any split/buffer
-  -- swap fires the winopts reassertion, so it's the genuine user state. When
-  -- the window we open from itself shows a stitch view (window='current'
-  -- chains), inherit *its* snapshot — capturing its live options would record
-  -- stitch's forced ones as the user's.
-  local cursorline = vim.wo.cursorline
-  local from_st = M.state[vim.api.nvim_get_current_buf()]
-  local normal_winopts = (from_st and from_st.normal_winopts) or capture_winopts(0)
+  viewwin.adopt(buf)
   if mode == 'current' then
     vim.api.nvim_set_current_buf(buf)
   elseif mode == 'vsplit' then
@@ -262,12 +201,7 @@ local function open_window(buf)
     vim.api.nvim_win_set_buf(0, buf)
   end
   local win = vim.api.nvim_get_current_win()
-  local st = M.state[buf]
-  if st then
-    st.normal_winopts = normal_winopts
-  end
-  apply_winopts(win)
-  vim.api.nvim_set_option_value('cursorline', cursorline, { scope = 'local', win = win })
+  viewwin.claim(win, buf)
   return win
 end
 
@@ -437,8 +371,9 @@ end
 -- numbers (column 4, where single-digit numbers sit).
 local DIVIDER_GUTTER = '%#StitchSeparator#    ⋮ %*'
 
---- The source line-number gutter, rendered as a real `statuscolumn` (see
---- apply_winopts). For a real buffer line it maps the drawn row back to its
+--- The source line-number gutter, rendered as a real `statuscolumn` (forced
+--- window-locally by stitch.viewwin). For a real buffer line it maps the
+--- drawn row back to its
 --- source line — via the paint baseline when the buffer is clean, or the live
 --- row→source map mid-edit (so inserted/split lines keep correct numbers); the
 --- diff only runs when the buffer is modified, so a clean redraw never pays for
@@ -748,30 +683,8 @@ function M.open(source)
     buffer = buf,
     once = true,
     callback = function()
-      -- Hand windows still showing the view (e.g. window='current') their real
-      -- options back: they're about to show another buffer and would otherwise
-      -- keep the stitch gutter / nonumber for good.
-      local st = M.state[buf]
-      for _, w in ipairs(vim.fn.win_findbuf(buf)) do
-        M.restore_winopts(w, st and st.normal_winopts)
-      end
       intent.discard(buf)
       M.state[buf] = nil
-    end,
-  })
-
-  -- The user can also switch the stitch window to another buffer (`:b#`,
-  -- `:edit file`) without wiping the view; restore that window's options as
-  -- the buffer leaves it. (BufWinLeave doesn't fire while the view stays
-  -- visible in another window — which keeps its forced options, correctly.)
-  vim.api.nvim_create_autocmd('BufWinLeave', {
-    buffer = buf,
-    callback = function()
-      local win = vim.api.nvim_get_current_win()
-      if vim.api.nvim_win_get_buf(win) == buf then
-        local st = M.state[buf]
-        M.restore_winopts(win, st and st.normal_winopts)
-      end
     end,
   })
 
@@ -814,20 +727,6 @@ function M.open(source)
     buffer = buf,
     callback = function()
       M.sync(buf)
-    end,
-  })
-
-  -- The view options (and the statuscolumn gutter in particular) are
-  -- window-local, so reassert them whenever this buffer is displayed in a window
-  -- — e.g. a `<C-w>s` split — or it would render there with the default number
-  -- column and lose the source-line gutter entirely.
-  vim.api.nvim_create_autocmd({ 'BufWinEnter', 'WinEnter' }, {
-    buffer = buf,
-    callback = function()
-      local win = vim.api.nvim_get_current_win()
-      if vim.api.nvim_win_get_buf(win) == buf then
-        apply_winopts(win)
-      end
     end,
   })
 
