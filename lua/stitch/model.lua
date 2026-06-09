@@ -109,18 +109,51 @@ function M.materialize(file_src, levels)
   return blocks
 end
 
---- Re-base a file's match line numbers after write-back changed its source.
---- Each edit is { l0, oldcount, newcount }: source lines [l0, l0+oldcount-1]
---- (1-based) were replaced by `newcount` lines (oldcount=0 ⇒ pure insertion at
---- l0). Matches on deleted lines are dropped; matches below an edit shift by the
---- net line delta. The newly written lines of each edit are pinned so they stay
---- visible after the repaint (they aren't matches and context 0 wouldn't show
---- them); existing pins are rebased the same way matches are. Keeps match_lnums,
---- matches, pinned, line_count, and (if present) levels consistent so a repaint
---- from the now-saved source is correct.
+--- Diff `old_lines` against `new_lines` and return the source edits that turn the
+--- first into the second, as `shift_file` consumes them: `{ l0, oldcount, newcount }`
+--- with `oldcount == 0` ⇒ pure insertion before `l0`. Used to rebase the model when
+--- a source file changed underneath the view (see render.sync); the same vim.diff
+--- decomposition the write-back path uses, run the other direction.
+--- @param old_lines string[]
+--- @param new_lines string[]
+function M.diff_to_edits(old_lines, new_lines)
+  local hunks = vim.diff(
+    table.concat(old_lines, '\n') .. '\n',
+    table.concat(new_lines, '\n') .. '\n',
+    { result_type = 'indices' }
+  )
+  local edits = {}
+  for _, h in ipairs(hunks) do
+    local sa, ca, sb, cb = h[1], h[2], h[3], h[4]
+    if ca == 0 then
+      -- vim.diff reports start_a as the line *after which* text is inserted, so
+      -- the insertion lands before sa + 1.
+      edits[#edits + 1] = { l0 = sa + 1, oldcount = 0, newcount = cb }
+    else
+      edits[#edits + 1] = { l0 = sa, oldcount = ca, newcount = cb }
+    end
+  end
+  return edits
+end
+
+--- Re-base a file's match line numbers after its source changed. Each edit is
+--- { l0, oldcount, newcount }: source lines [l0, l0+oldcount-1] (1-based) were
+--- replaced by `newcount` lines (oldcount=0 ⇒ pure insertion at l0). Matches on
+--- deleted lines are dropped; matches below an edit shift by the net line delta.
+--- When `pin_new` (default true) the newly written lines of each edit are pinned
+--- so they stay visible after the repaint (they aren't matches and context 0
+--- wouldn't show them) — write-back wants this for lines the user added; an
+--- external-drift rebase passes false so foreign edits don't force themselves
+--- into the view. Existing pins are rebased the same way matches are. Keeps
+--- match_lnums, matches, pinned, line_count, and (if present) levels consistent so
+--- a repaint from the now-current source is correct.
 --- @param file table view file (match_lnums, matches, levels?, pinned?, line_count)
 --- @param edits table[]
-function M.shift_file(file, edits)
+--- @param pin_new boolean|nil pin each edit's new lines (default true)
+function M.shift_file(file, edits, pin_new)
+  if pin_new == nil then
+    pin_new = true
+  end
   table.sort(edits, function(a, b)
     return a.l0 < b.l0
   end)
@@ -173,9 +206,11 @@ function M.shift_file(file, edits)
   end
   local delta = 0
   for _, e in ipairs(edits) do
-    local new_start = e.l0 + delta
-    for l = new_start, new_start + e.newcount - 1 do
-      npinned[l] = true
+    if pin_new then
+      local new_start = e.l0 + delta
+      for l = new_start, new_start + e.newcount - 1 do
+        npinned[l] = true
+      end
     end
     delta = delta + (e.newcount - e.oldcount)
   end
@@ -235,5 +270,9 @@ function M.from_items(items, title)
 
   return { title = title or 'Stitch', files = files }
 end
+
+-- The current source of a file, buffer-first (so unsaved buffer edits are seen),
+-- disk otherwise. Exposed for render.sync's divergence check / rebase.
+M.read_lines = read_lines
 
 return M

@@ -22,6 +22,11 @@ local function adjust(buf, count, sign)
     return
   end
 
+  -- Pick up any source drift first, so the relayout below is computed from a
+  -- model that matches the current source rather than mis-rendering against a
+  -- stale one. (A no-op when nothing changed.)
+  render.sync(buf)
+
   -- Expand/collapse re-lays-out the buffer, which can't preserve structural
   -- (multi-line / insert / delete) edits. Require a clean buffer first.
   if vim.bo[buf].modified then

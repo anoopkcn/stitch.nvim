@@ -13,6 +13,8 @@ local reconcile = require('stitch.reconcile')
 local intent = require('stitch.intent')
 local srclang = require('stitch.lang')
 
+local uv = vim.uv or vim.loop
+
 local M = {}
 
 local ns = vim.api.nvim_create_namespace('stitch')
@@ -403,6 +405,62 @@ local function decorate(buf, st, rows)
   end
 end
 
+-- Source-drift tracking. The view is painted from a snapshot of each source
+-- file; if a file changes underneath us (edited in another window, or on disk)
+-- the view goes stale and a naive repaint would mis-render (gutter line numbers
+-- and content disagree). For each file we keep `sync_lines` (its full source at
+-- snapshot time, what a rebase diffs against) plus a cheap change-marker
+-- (`changedtick` for a loaded buffer, else `mtime`+`size`) so the common
+-- no-change check is O(1). These must be refreshed in lockstep with st.snapshot:
+-- both paint and rebase_inplace call capture_sync, so our own writes never read
+-- back as external drift.
+local function capture_sync_file(f, lines)
+  f.sync_lines = lines or model.read_lines(f.filename, f.bufnr)
+  f.sync_tick = (f.bufnr and vim.api.nvim_buf_is_loaded(f.bufnr))
+      and vim.api.nvim_buf_get_changedtick(f.bufnr) or nil
+  local stat = uv.fs_stat(f.filename)
+  f.sync_mtime = stat and stat.mtime or nil
+  f.sync_size = stat and stat.size or nil
+end
+
+local function capture_sync(st)
+  for _, f in ipairs(st.view.files) do
+    capture_sync_file(f)
+  end
+end
+
+-- Cheap pre-filter: has this file *possibly* changed since capture_sync? A loaded
+-- buffer's changedtick is exact; an unloaded/on-disk file falls back to mtime+size
+-- (which misses a same-second, same-length on-disk edit — acceptable, since query
+-- results are normally loaded buffers where the tick is exact).
+local function maybe_changed(f)
+  if f.bufnr and vim.api.nvim_buf_is_loaded(f.bufnr) then
+    return vim.api.nvim_buf_get_changedtick(f.bufnr) ~= f.sync_tick
+  end
+  local stat = uv.fs_stat(f.filename)
+  if not stat then
+    return false -- gone/unreadable: leave the view as-is; the save guard handles writes
+  end
+  if not f.sync_mtime or not f.sync_size then
+    return true
+  end
+  return stat.size ~= f.sync_size
+      or stat.mtime.sec ~= f.sync_mtime.sec
+      or stat.mtime.nsec ~= f.sync_mtime.nsec
+end
+
+local function lines_equal(a, b)
+  if #a ~= #b then
+    return false
+  end
+  for i = 1, #a do
+    if a[i] ~= b[i] then
+      return false
+    end
+  end
+  return true
+end
+
 -- Paint st.view into the buffer: a clean re-render from the source model. The
 -- buffer text is pure source; all metadata is carried by extmarks (see decorate).
 -- Records st.snapshot (painted text) and st.origin (per-row source info) as the
@@ -435,6 +493,10 @@ local function paint(buf, st)
   decorate(buf, st, st.origin)
   st.decorated_count = #lines
   st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
+
+  -- The view now matches current source: reset the drift baseline so a later
+  -- focus event doesn't read this paint as external change.
+  capture_sync(st)
 
   vim.bo[buf].undolevels = save_undolevels
   vim.bo[buf].modified = false
@@ -500,6 +562,11 @@ function M.rebase_inplace(buf, current)
   end
   st.snapshot = current
   st.live = nil
+  -- We just wrote these source files (their changedtick/mtime advanced); refresh
+  -- the drift baseline so the next focus event doesn't mistake our own in-place
+  -- write for external change and force a repaint (which would clear undo — the
+  -- very thing this in-place path exists to preserve).
+  capture_sync(st)
 end
 
 --- Re-place the gutter and decorations for the current (edited) buffer so
@@ -515,6 +582,75 @@ function M.redecorate(buf)
     decorate(buf, st, map)
     st.decorated_count = vim.api.nvim_buf_line_count(buf)
     st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
+  end
+end
+
+--- Reconcile the view with its source files when they changed underneath it
+--- (edited in another window, or on disk). Autoread-style: if the stitch buffer
+--- has no unsaved edits, rebase each drifted file's model (line numbers follow
+--- their source; matches on deleted lines drop) and repaint from fresh source —
+--- which also keeps the gutter and content in agreement. If the buffer *does*
+--- have unsaved edits, leave it untouched and warn once: clobbering the user's
+--- in-progress work to chase the source is never worth it, and `:w` already
+--- skips drifted hunks via the divergence guard.
+---
+--- This rebases *existing* stitches; it does not re-run the grep/diagnostics/diff
+--- query, so a source edit that creates a brand-new match won't surface here.
+function M.sync(buf)
+  local st = M.state[buf]
+  if not st or not st.snapshot or st.syncing then
+    return
+  end
+
+  -- Confirm real content divergence (the cheap marker is only a pre-filter) and
+  -- compute each drifted file's rebase edits. A file whose marker moved but whose
+  -- content is unchanged (e.g. it was just loaded into a buffer, or its mtime was
+  -- touched) gets its marker refreshed so we don't re-check it every event.
+  local diverged = {}
+  for _, f in ipairs(st.view.files) do
+    if maybe_changed(f) then
+      local current = model.read_lines(f.filename, f.bufnr)
+      if lines_equal(current, f.sync_lines) then
+        capture_sync_file(f, current) -- marker moved but content didn't; re-baseline
+      else
+        diverged[#diverged + 1] = { file = f, edits = model.diff_to_edits(f.sync_lines, current) }
+      end
+    end
+  end
+  if #diverged == 0 then
+    return
+  end
+
+  if vim.bo[buf].modified then
+    if not st.stale then
+      st.stale = true
+      vim.notify(
+        'stitches: source changed underneath — your edits are kept; :w writes them (drifted lines are skipped), undo to refresh',
+        vim.log.levels.WARN
+      )
+    end
+    return
+  end
+
+  st.syncing = true
+  local win = vim.api.nvim_get_current_win()
+  local saved = (vim.api.nvim_win_get_buf(win) == buf) and vim.fn.winsaveview() or nil
+  local ok, err = pcall(function()
+    for _, d in ipairs(diverged) do
+      model.shift_file(d.file, d.edits, false) -- false: don't pin foreign edits into the view
+    end
+    paint(buf, st) -- repaints and re-captures the drift baseline for every file
+  end)
+  -- Always clear the guard: a paint that threw must not wedge sync off for the
+  -- buffer's whole life.
+  st.syncing = false
+  if saved then
+    pcall(vim.fn.winrestview, saved)
+  end
+  if ok then
+    st.stale = false
+  else
+    vim.notify('stitches: source refresh failed: ' .. tostring(err), vim.log.levels.ERROR)
   end
 end
 
@@ -593,6 +729,16 @@ function M.open(source)
       elseif st.decorated_tick ~= vim.api.nvim_buf_get_changedtick(buf) then
         M.redecorate(buf)
       end
+    end,
+  })
+
+  -- Refresh from source when the view regains focus after the source was edited
+  -- elsewhere (BufEnter/WinEnter), or while dwelling on it as a file changes on
+  -- disk (CursorHold). M.sync is a cheap no-op when nothing drifted.
+  vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter', 'CursorHold' }, {
+    buffer = buf,
+    callback = function()
+      M.sync(buf)
     end,
   })
 
