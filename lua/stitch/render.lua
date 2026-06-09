@@ -162,6 +162,16 @@ local function set_keymaps(buf)
       require('stitch.context').collapse(buf, n > 0 and n or nil)
     end, opts)
   end
+  -- `gg` lands on the first stitch, not the row-0 spacer — which is blank and
+  -- only carries the first file's header (virt_lines can't render above line 0,
+  -- so the header rides that spacer). A count behaves like the native motion, so
+  -- `1gg` still reaches the header line.
+  vim.keymap.set('n', 'gg', function()
+    local last = vim.api.nvim_buf_line_count(buf)
+    local count = vim.v.count
+    local target = count > 0 and math.min(count, last) or math.min(2, last)
+    vim.cmd('normal! ' .. target .. 'G')
+  end, opts)
 end
 
 -- Native `gc`/`gcc` reads 'commentstring' to choose the comment syntax — pure
