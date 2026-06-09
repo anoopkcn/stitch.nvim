@@ -10,18 +10,18 @@
 local config = require('stitch.config')
 local model = require('stitch.model')
 local reconcile = require('stitch.reconcile')
+local baseline = require('stitch.baseline')
 local intent = require('stitch.intent')
 local srclang = require('stitch.lang')
-
-local uv = vim.uv or vim.loop
 
 local M = {}
 
 local ns = vim.api.nvim_create_namespace('stitch')
 
 -- bufnr -> {
---   marks = { [extmark_id] = { filename, bufnr, lnum, col, source } },
---   view  = { title, files = { source-model file + .levels }, files_by_name },
+--   marks    = { [extmark_id] = { filename, bufnr, lnum, col, source } },
+--   view     = { title, files = { source-model file + .levels }, files_by_name },
+--   baseline = stitch.baseline object: snapshot/origin/live diff/drift markers
 -- }
 M.state = {}
 
@@ -373,8 +373,8 @@ end
 local function build_infos(st)
   local lines = { '' }
   local infos = {}
-  -- Each file's full source, read once here and reused for the drift baseline
-  -- (capture_sync) — otherwise every (re)paint reads every file twice.
+  -- Each file's full source, read once here and reused to seed the baseline's
+  -- drift markers — otherwise every (re)paint reads every file twice.
   local src_by_file = {}
   for fi, f in ipairs(st.view.files) do
     local src_lines = model.read_lines(f.filename, f.bufnr)
@@ -429,8 +429,7 @@ end
 -- invalidate=false / right_gravity=false so they survive whole-line edits (e.g.
 -- `gcc`); virt_lines use right_gravity=false so headers don't drift downward.
 --
--- Records st.snapshot (the painted source text) and st.origin (the source
--- {filename,bufnr,lnum,col,source} of every buffer row) as the baseline that
+-- Resets st.baseline (the painted text + per-row source origin) as what
 -- write-back diffs the edited buffer against. Native edits — `gcc`, `dd`, `J`,
 -- inserts, multi-line changes — need no special handling: the diff reconciles
 -- whatever state the buffer ends up in.
@@ -471,7 +470,7 @@ function M.statuscol()
   if g and g.k == 'header0' then
     return g.s -- first file's header overlaid on the row-0 spacer
   end
-  local map = vim.bo[buf].modified and M.live_map(buf) or st.origin
+  local map = st.baseline and st.baseline:map()
   local info = map and map[vim.v.lnum]
   if not info then
     return GUTTER -- the row-0 spacer, or a line the user inserted (no source yet)
@@ -610,68 +609,10 @@ local function decorate(buf, st, rows, lines)
   end
 end
 
--- Source-drift tracking. The view is painted from a snapshot of each source
--- file; if a file changes underneath us (edited in another window, or on disk)
--- the view goes stale and a naive repaint would mis-render (gutter line numbers
--- and content disagree). For each file we keep `sync_lines` (its full source at
--- snapshot time, what a rebase diffs against) plus a cheap change-marker
--- (`changedtick` for a loaded buffer, else `mtime`+`size`) so the common
--- no-change check is O(1). These must be refreshed in lockstep with st.snapshot:
--- both paint and rebase_inplace call capture_sync, so our own writes never read
--- back as external drift.
-local function capture_sync_file(f, lines)
-  f.sync_lines = lines or model.read_lines(f.filename, f.bufnr)
-  f.sync_tick = (f.bufnr and vim.api.nvim_buf_is_loaded(f.bufnr))
-      and vim.api.nvim_buf_get_changedtick(f.bufnr) or nil
-  local stat = uv.fs_stat(f.filename)
-  f.sync_mtime = stat and stat.mtime or nil
-  f.sync_size = stat and stat.size or nil
-end
-
--- `lines_by_file` (optional) provides already-read source content keyed by
--- filename, so a paint that just read every file doesn't read them all again.
-local function capture_sync(st, lines_by_file)
-  for _, f in ipairs(st.view.files) do
-    capture_sync_file(f, lines_by_file and lines_by_file[f.filename])
-  end
-end
-
--- Cheap pre-filter: has this file *possibly* changed since capture_sync? A loaded
--- buffer's changedtick is exact; an unloaded/on-disk file falls back to mtime+size
--- (which misses a same-second, same-length on-disk edit — acceptable, since query
--- results are normally loaded buffers where the tick is exact).
-local function maybe_changed(f)
-  if f.bufnr and vim.api.nvim_buf_is_loaded(f.bufnr) then
-    return vim.api.nvim_buf_get_changedtick(f.bufnr) ~= f.sync_tick
-  end
-  local stat = uv.fs_stat(f.filename)
-  if not stat then
-    return false -- gone/unreadable: leave the view as-is; the save guard handles writes
-  end
-  if not f.sync_mtime or not f.sync_size then
-    return true
-  end
-  return stat.size ~= f.sync_size
-      or stat.mtime.sec ~= f.sync_mtime.sec
-      or stat.mtime.nsec ~= f.sync_mtime.nsec
-end
-
-local function lines_equal(a, b)
-  if #a ~= #b then
-    return false
-  end
-  for i = 1, #a do
-    if a[i] ~= b[i] then
-      return false
-    end
-  end
-  return true
-end
-
 -- Paint st.view into the buffer: a clean re-render from the source model. The
--- buffer text is pure source; all metadata is carried by extmarks (see decorate).
--- Records st.snapshot (painted text) and st.origin (per-row source info) as the
--- baseline that write-back and the live row→source map diff against.
+-- buffer text is pure source; all metadata is carried by extmarks (see
+-- decorate). Resets st.baseline — snapshot, per-row origin, drift markers —
+-- which is what write-back and the live row→source map diff against.
 local function paint(buf, st)
   local lines, infos, src_by_file = build_infos(st)
 
@@ -682,216 +623,18 @@ local function paint(buf, st)
   vim.bo[buf].undolevels = -1
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
-  -- origin[row+1] is the source info for buffer row r; origin[1] (the row-0
-  -- spacer) is false. The full info is kept so decorate can re-run from it.
-  st.snapshot = lines
-  st.origin = { [1] = false }
-  for _, info in ipairs(infos) do
-    st.origin[info.row + 1] = info
-  end
-  st.live = nil
-  -- Fresh baseline: every line now maps to source, so there are no pending
-  -- insertions to attribute.
+  -- Fresh baseline (the lines read by build_infos seed the drift markers, so
+  -- nothing is read twice). Every line now maps to source, so there are no
+  -- pending insertions to attribute either.
+  st.baseline:reset(lines, infos, src_by_file)
   intent.reset(buf)
-  -- The layout changed wholesale; drop the highlighter's cached layout so it
-  -- recomputes its blocks and fallback regions on the next redraw.
-  st.hl_layout, st.hl_regions_tick = nil, nil
 
-  decorate(buf, st, st.origin, lines)
+  decorate(buf, st, st.baseline.origin, lines)
   st.decorated_count = #lines
   st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
 
-  -- The view now matches current source: reset the drift baseline so a later
-  -- focus event doesn't read this paint as external change. The lines read by
-  -- build_infos are reused, so this doesn't re-read every file.
-  capture_sync(st, src_by_file)
-
   vim.bo[buf].undolevels = save_undolevels
   vim.bo[buf].modified = false
-end
-
---- Build (or reuse) the complete cached reconciliation of `buf` against the
---- painted baseline: { tick, map, hunks, current }. Both M.live_map and
---- M.reconcile go through this, so the cached entry is never partial and a `:w`
---- landing on the same changedtick a redraw already filled reuses the one entry.
---- Recomputed on a changedtick miss; cleared by paint and rebase_inplace.
---- Returns nil before the first paint.
-local function live_entry(buf)
-  local st = M.state[buf]
-  if not st or not st.snapshot then
-    return nil
-  end
-  local tick = vim.api.nvim_buf_get_changedtick(buf)
-  if st.live and st.live.tick == tick then
-    return st.live
-  end
-  local current = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  local r = reconcile.compute(st.snapshot, current, st.origin)
-  st.live = { tick = tick, map = r.map, hunks = r.hunks, current = current }
-  return st.live
-end
-
---- Map current buffer rows to their painted source info: an array where
---- map[r+1] is the info for buffer row r, or false for the spacer / a line the
---- user inserted. Cached per changedtick. This is what keeps numbers + syntax
---- correct mid-edit: an inserted line reads as an insertion, so the lines around
---- it keep their source identity.
-function M.live_map(buf)
-  local e = live_entry(buf)
-  return e and e.map or nil
-end
-
---- The full reconciliation of the current buffer against the painted baseline,
---- for write-back: { map, hunks, current, origin }. `current` is the exact text
---- the hunks were diffed from (cached, not re-read), so the editor applies the
---- same text the display is showing.
-function M.reconcile(buf)
-  local e = live_entry(buf)
-  if not e then
-    return nil
-  end
-  return { map = e.map, hunks = e.hunks, current = e.current, origin = M.state[buf].origin }
-end
-
---- Advance the diff baseline to `current` after a pure in-place clean save,
---- without re-laying-out (so undo survives, like a normal :w). `current` is the
---- exact text written back. Must drop st.live: no buffer edit happened, so
---- changedtick is unchanged and a stale cached diff would otherwise re-apply the
---- same edits on the next :w.
-function M.rebase_inplace(buf, current)
-  local st = M.state[buf]
-  if not st then
-    return
-  end
-  for i, o in pairs(st.origin) do
-    if o and o.lnum then
-      o.source = current[i]
-    end
-  end
-  st.snapshot = current
-  st.live = nil
-  st.hl_layout, st.hl_regions_tick = nil, nil -- baseline moved without a buffer edit
-  -- We just wrote these source files (their changedtick/mtime advanced); refresh
-  -- the drift baseline so the next focus event doesn't mistake our own in-place
-  -- write for external change and force a repaint (which would clear undo — the
-  -- very thing this in-place path exists to preserve).
-  capture_sync(st)
-end
-
---- Advance the diff baseline for just the applied plans of a *partial* save
---- (some hunks diverged or were unmappable, so the buffer stays modified and no
---- repaint happens — repainting would discard the user's un-written edits).
---- Splices each applied plan's new lines into st.snapshot/st.origin so the next
---- diff no longer reports them, shifts the origin line numbers below each
---- structural edit (in lockstep with the model shift the editor already did),
---- and advances each written file's drift baseline so render.sync doesn't read
---- our own write as external change. Plans carry s0/s1 (the snapshot rows they
---- replace; s1 < s0 for an insertion) and l0/l1/newlines in the source
---- coordinates of the current baseline; only plans with .applied are consumed.
-function M.rebase_partial(buf, plans)
-  local st = M.state[buf]
-  if not st or not st.snapshot then
-    return
-  end
-  local applied = {}
-  for _, p in ipairs(plans) do
-    if p.applied then
-      applied[#applied + 1] = p
-    end
-  end
-  if #applied == 0 then
-    return
-  end
-  table.sort(applied, function(a, b)
-    return a.s0 < b.s0
-  end)
-
-  -- Splice the applied regions into a new snapshot/origin pair. Origin rows of
-  -- a file below one of its structural edits shift by the running per-file
-  -- delta; the info tables are mutated in place, so st.marks (which shares
-  -- them) stays consistent too.
-  local snap, origin, delta = {}, {}, {}
-  local si = 1
-  local function copy_to(last)
-    while si <= last do
-      local o = st.origin[si]
-      if o and o.lnum and delta[o.filename] then
-        o.lnum = o.lnum + delta[o.filename]
-      end
-      snap[#snap + 1] = st.snapshot[si]
-      origin[#origin + 1] = o or false
-      si = si + 1
-    end
-  end
-  for _, p in ipairs(applied) do
-    copy_to(p.s0 - 1)
-    si = math.max(si, p.s1 + 1) -- drop the replaced rows (insertion: s1 < s0, no-op)
-    local d = delta[p.filename] or 0
-    -- A 1:1 in-place replacement keeps each row's identity (is_match drives the
-    -- gutter brightness); spans/annotation are dropped — the text changed.
-    local inplace = p.s1 >= p.s0 and #p.newlines == (p.s1 - p.s0 + 1)
-    for k, line in ipairs(p.newlines) do
-      local old = inplace and st.origin[p.s0 + k - 1] or nil
-      snap[#snap + 1] = line
-      origin[#origin + 1] = {
-        filename = p.filename,
-        relname = p.relname,
-        bufnr = p.bufnr,
-        lnum = p.l0 + d + k - 1,
-        col = (old and old.col) or 1,
-        is_match = (old and old.is_match) or nil,
-        source = line,
-      }
-    end
-    delta[p.filename] = d + #p.newlines - math.max(0, p.l1 - p.l0 + 1)
-  end
-  copy_to(#st.snapshot)
-  st.snapshot = snap
-  st.origin = origin
-  st.live = nil -- changedtick didn't move; a stale cached diff would replay the old hunks
-  st.hl_layout, st.hl_regions_tick = nil, nil -- ditto for the highlighter's caches
-
-  -- Advance each written file's drift baseline by the same edits. If the
-  -- result matches the file's actual content, our write was the only change
-  -- and the markers can move with it; otherwise the file *also* drifted
-  -- externally — keep the markers stale so sync() still sees that drift.
-  local by_file = {}
-  for _, p in ipairs(applied) do
-    by_file[p.filename] = by_file[p.filename] or {}
-    table.insert(by_file[p.filename], p)
-  end
-  for filename, fplans in pairs(by_file) do
-    local f = st.view.files_by_name[filename]
-    if f and f.sync_lines then
-      table.sort(fplans, function(a, b)
-        return a.l0 < b.l0
-      end)
-      local expected, i = {}, 1
-      for _, p in ipairs(fplans) do
-        while i < p.l0 do
-          expected[#expected + 1] = f.sync_lines[i]
-          i = i + 1
-        end
-        for _, line in ipairs(p.newlines) do
-          expected[#expected + 1] = line
-        end
-        i = math.max(i, p.l1 + 1)
-      end
-      while i <= #f.sync_lines do
-        expected[#expected + 1] = f.sync_lines[i]
-        i = i + 1
-      end
-      local actual = model.read_lines(f.filename, f.bufnr)
-      if lines_equal(actual, expected) then
-        capture_sync_file(f, actual)
-      else
-        f.sync_lines = expected
-      end
-    end
-  end
-
-  -- Give the spliced-in rows their anchors (record_at / jump / gutter numbers).
-  M.redecorate(buf)
 end
 
 --- Re-place the gutter and decorations for the current (edited) buffer so
@@ -899,10 +642,10 @@ end
 --- Only sets extmarks — never touches buffer text or undo.
 function M.redecorate(buf)
   local st = M.state[buf]
-  if not st or not st.snapshot then
+  if not st or not st.baseline.snapshot then
     return
   end
-  local e = live_entry(buf)
+  local e = st.baseline:reconcile()
   if e and e.map then
     decorate(buf, st, e.map, e.current) -- e.current: the exact text e.map was diffed from
     st.decorated_count = vim.api.nvim_buf_line_count(buf)
@@ -923,25 +666,11 @@ end
 --- query, so a source edit that creates a brand-new match won't surface here.
 function M.sync(buf)
   local st = M.state[buf]
-  if not st or not st.snapshot or st.syncing then
+  if not st or not st.baseline or not st.baseline.snapshot or st.syncing then
     return
   end
 
-  -- Confirm real content divergence (the cheap marker is only a pre-filter) and
-  -- compute each drifted file's rebase edits. A file whose marker moved but whose
-  -- content is unchanged (e.g. it was just loaded into a buffer, or its mtime was
-  -- touched) gets its marker refreshed so we don't re-check it every event.
-  local diverged = {}
-  for _, f in ipairs(st.view.files) do
-    if maybe_changed(f) then
-      local current = model.read_lines(f.filename, f.bufnr)
-      if lines_equal(current, f.sync_lines) then
-        capture_sync_file(f, current) -- marker moved but content didn't; re-baseline
-      else
-        diverged[#diverged + 1] = { file = f, edits = model.diff_to_edits(f.sync_lines, current) }
-      end
-    end
-  end
+  local diverged = st.baseline:drift()
   if #diverged == 0 then
     return
   end
@@ -961,10 +690,8 @@ function M.sync(buf)
   local win = vim.api.nvim_get_current_win()
   local saved = (vim.api.nvim_win_get_buf(win) == buf) and vim.fn.winsaveview() or nil
   local ok, err = pcall(function()
-    for _, d in ipairs(diverged) do
-      model.shift_file(d.file, d.edits, false) -- false: don't pin foreign edits into the view
-    end
-    paint(buf, st) -- repaints and re-captures the drift baseline for every file
+    st.baseline:absorb(diverged) -- rebase the model; foreign edits aren't pinned
+    paint(buf, st) -- repaints and resets the baseline (drift markers included)
   end)
   -- Always clear the guard: a paint that threw must not wedge sync off for the
   -- buffer's whole life.
@@ -997,6 +724,7 @@ function M.open(source)
     by_name[f.filename] = f
   end
   st.view = { title = source.title, files = files, files_by_name = by_name }
+  st.baseline = baseline.new(buf, st.view)
 
   paint(buf, st)
 

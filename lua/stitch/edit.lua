@@ -14,7 +14,6 @@
 -- contiguous source range (it spans files or non-adjacent blocks) is likewise
 -- skipped.
 local render = require('stitch.render')
-local model = require('stitch.model')
 local intent = require('stitch.intent')
 
 local M = {}
@@ -103,8 +102,8 @@ end
 -- Each plan replaces source lines [l0, l1] (1-based) of `filename` with
 -- `newlines`; l1 == l0 - 1 means a pure insertion before l0. Plans also carry
 -- s0/s1, the snapshot rows they replace (s1 < s0 for an insertion), so a
--- partial save can splice the applied ones into the baseline
--- (render.rebase_partial).
+-- partial save can splice the applied ones into the baseline (see
+-- stitch.baseline advance/splice).
 local function plan_hunk(hunk, origin, current, buf)
   local sa, ca, sb, cb = hunk[1], hunk[2], hunk[3], hunk[4]
   local brow = math.max(0, sb - 1)
@@ -224,15 +223,15 @@ end
 --- Handle `:w` on a stitch view.
 function M.save(buf)
   local st = render.state[buf]
-  if not st or not st.snapshot then
+  if not st or not st.baseline or not st.baseline.snapshot then
     return
   end
   vim.api.nvim_buf_clear_namespace(buf, warn_ns, 0, -1)
 
-  -- One diff of the buffer against the painted baseline, shared with the display
-  -- (see render.reconcile / reconcile.compute). `current` is the exact text the
+  -- One diff of the buffer against the baseline, shared with the display (see
+  -- stitch.baseline / reconcile.compute). `current` is the exact text the
   -- hunks were diffed from.
-  local R = render.reconcile(buf)
+  local R = st.baseline:reconcile()
   if not R then
     return
   end
@@ -313,71 +312,20 @@ function M.save(buf)
 
   -- Structural = some applied change added or removed source lines, so the
   -- displayed line numbers below it shifted and the view must be re-laid-out.
-  -- A purely in-place save leaves the layout untouched.
-  local structural = false
-  for _, p in ipairs(all_plans) do
-    if p.applied and (p.l1 < p.l0 or #p.newlines ~= (p.l1 - p.l0 + 1)) then
-      structural = true
-      break
-    end
-  end
-
+  -- Advance the baseline by what was applied; it keeps the view model and the
+  -- drift markers in lockstep and decides the display work: a clean structural
+  -- save needs a full re-layout, a clean in-place save advances in place (undo
+  -- survives), a partial save splices just the applied hunks so the next :w
+  -- doesn't re-plan them — and the un-written edits (with their inline flags)
+  -- stay in the buffer for the user to resolve and save again.
   local clean = (unmappable == 0 and diverged == 0)
-  if clean and structural then
-    -- Re-base the model for the lines we shifted, then re-render from the saved
-    -- source: fresh line numbers and snapshot. (This relayout clears undo.)
-    for _, filename in ipairs(order) do
-      local vfile = st.view.files_by_name[filename]
-      if vfile then
-        local edits = {}
-        for _, p in ipairs(by_file[filename].plans) do
-          edits[#edits + 1] = {
-            l0 = p.l0,
-            oldcount = math.max(0, p.l1 - p.l0 + 1),
-            newcount = #p.newlines,
-          }
-        end
-        model.shift_file(vfile, edits)
-      end
-    end
-    render.repaint(buf)
-    vim.bo[buf].modified = false
-  elseif clean then
-    -- Pure in-place save: the buffer already shows the final text and line
-    -- numbers are unchanged, so skip the relayout (and keep the undo history,
-    -- like a normal `:w`). Just advance the diff baseline to what we wrote.
-    render.rebase_inplace(buf, current)
-    vim.bo[buf].modified = false
-  else
-    -- Keep the user's edits (including un-written ones) and the inline flags so
-    -- they can resolve the conflict and save again. The hunks that *were*
-    -- applied must still advance the baseline: left in the diff, the next :w
-    -- would re-plan them, read our own write as divergence, and flag every
-    -- previously-applied edit "source changed" forever — and the stale drift
-    -- markers would read our write as external change on the next focus event.
-    local applied_any = false
-    for _, filename in ipairs(order) do
-      local vfile = st.view.files_by_name[filename]
-      local edits = {}
-      for _, p in ipairs(by_file[filename].plans) do
-        if p.applied then
-          applied_any = true
-          edits[#edits + 1] = {
-            l0 = p.l0,
-            oldcount = math.max(0, p.l1 - p.l0 + 1),
-            newcount = #p.newlines,
-          }
-        end
-      end
-      if vfile and #edits > 0 then
-        model.shift_file(vfile, edits)
-      end
-    end
-    if applied_any then
-      render.rebase_partial(buf, all_plans)
-    end
-    vim.bo[buf].modified = true
+  local action = st.baseline:advance(all_plans, current, clean)
+  if action == 'repaint' then
+    render.repaint(buf) -- re-render from saved source (this relayout clears undo)
+  elseif action == 'redecorate' then
+    render.redecorate(buf) -- give spliced-in rows their anchors
   end
+  vim.bo[buf].modified = not clean
 
   local msg
   if edits_applied == 0 and clean then

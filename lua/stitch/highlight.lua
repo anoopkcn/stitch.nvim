@@ -43,26 +43,30 @@ local function row_lang(buf, map, bounds, row)
   return srclang.ts_lang(ref and ref.filename or nil), false
 end
 
--- The per-changedtick layout: the live row→source map, its bounds, and the
--- contiguous same-file blocks with a `dirty` flag (some row of the block was
--- edited or sits next to an inserted row, per the reconcile hunks — padded one
--- row so boundary inserts dirty their neighbours). Cached on st; cleared by
--- render (st.hl_layout = nil) whenever the baseline moves without a buffer
--- edit (paint / rebase).
+-- The per-(changedtick, baseline gen) layout: the live row→source map, its
+-- bounds, and the contiguous same-file blocks with a `dirty` flag (some row of
+-- the block was edited or sits next to an inserted row, per the reconcile
+-- hunks — padded one row so boundary inserts dirty their neighbours). The
+-- baseline's `gen` covers moves changedtick can't see (paint, rebase after a
+-- save), so no manual invalidation is needed.
 local function layout(buf, st)
+  local b = st.baseline
+  if not b then
+    return nil
+  end
   local tick = vim.api.nvim_buf_get_changedtick(buf)
-  if st.hl_layout and st.hl_layout.tick == tick then
+  if st.hl_layout and st.hl_layout.tick == tick and st.hl_layout.gen == b.gen then
     return st.hl_layout
   end
   local map, hunks
   if vim.bo[buf].modified then
-    local R = render.reconcile(buf)
+    local R = b:reconcile()
     if not R then
       return nil
     end
     map, hunks = R.map, R.hunks
   else
-    map, hunks = st.origin, {} -- clean buffer: rows are the baseline, no diff needed
+    map, hunks = b.origin, {} -- clean buffer: rows are the baseline, no diff needed
   end
   if not map then
     return nil
@@ -104,7 +108,7 @@ local function layout(buf, st)
     end
   end
 
-  st.hl_layout = { tick = tick, map = map, bounds = bounds, blocks = blocks }
+  st.hl_layout = { tick = tick, gen = b.gen, map = map, bounds = bounds, blocks = blocks }
   return st.hl_layout
 end
 
@@ -274,9 +278,10 @@ local function on_win(_, _, buf, top, bot)
   end
 
   -- Tier 2: buffer-parsed fallback for dirty blocks and inserted rows.
-  if st.hl_regions_tick ~= L.tick then
+  local regions_key = L.tick .. ':' .. L.gen
+  if st.hl_regions_key ~= regions_key then
     update_regions(buf, st, L)
-    st.hl_regions_tick = L.tick
+    st.hl_regions_key = regions_key
   end
   if not st.ts_parsers then
     return true
