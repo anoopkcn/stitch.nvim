@@ -7,10 +7,17 @@ read/edit and push changes back to the buffers, and jump straight to any source 
 
 ## Requirements
 
-- Neovim **0.11+** (developed against 0.12.x)
+- Neovim **0.12+** (developed against 0.12.x)
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) for the grep source
 
 ## Install
+
+The plugin works out of the box — no `setup()` call required.
+
+
+```lua
+vim.pack.add({"https://github.com/anoopkcn/stitch.nvim"})
+```
 
 ## Usage
 
