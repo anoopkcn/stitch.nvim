@@ -693,9 +693,9 @@ local function paint(buf, st)
   -- Fresh baseline: every line now maps to source, so there are no pending
   -- insertions to attribute.
   intent.reset(buf)
-  -- The layout changed wholesale; have the highlighter recompute its block
-  -- regions on the next redraw.
-  st.ts_regions_count = nil
+  -- The layout changed wholesale; drop the highlighter's cached layout so it
+  -- recomputes its blocks and fallback regions on the next redraw.
+  st.hl_layout, st.hl_regions_tick = nil, nil
 
   decorate(buf, st, st.origin, lines)
   st.decorated_count = #lines
@@ -770,6 +770,7 @@ function M.rebase_inplace(buf, current)
   end
   st.snapshot = current
   st.live = nil
+  st.hl_layout, st.hl_regions_tick = nil, nil -- baseline moved without a buffer edit
   -- We just wrote these source files (their changedtick/mtime advanced); refresh
   -- the drift baseline so the next focus event doesn't mistake our own in-place
   -- write for external change and force a repaint (which would clear undo — the
@@ -848,6 +849,7 @@ function M.rebase_partial(buf, plans)
   st.snapshot = snap
   st.origin = origin
   st.live = nil -- changedtick didn't move; a stale cached diff would replay the old hunks
+  st.hl_layout, st.hl_regions_tick = nil, nil -- ditto for the highlighter's caches
 
   -- Advance each written file's drift baseline by the same edits. If the
   -- result matches the file's actual content, our write was the only change
