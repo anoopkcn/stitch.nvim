@@ -41,7 +41,7 @@ local function adjust(buf, count, sign)
   end
 
   -- Find the block currently containing the cursor's source line.
-  local blocks = model.blocks_from_levels(file.match_lnums, file.levels, file.line_count)
+  local blocks = model.blocks_from_levels(file.match_lnums, file.levels, file.line_count, file.pinned)
   local block
   for _, b in ipairs(blocks) do
     if rec.lnum >= b.s and rec.lnum <= b.e then

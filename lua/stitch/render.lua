@@ -178,10 +178,10 @@ local function update_commentstring(buf)
   local rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   if rec then
     vim.bo[buf].commentstring = srclang.commentstring(rec.filename)
-    -- Remember the file under the cursor so a line inserted next is attributed
-    -- to it. Only updates on real stitch lines, so it survives the cursor
-    -- landing on a freshly-inserted (unanchored) line.
-    intent.note_cursor(buf, rec.filename)
+    -- Remember the source line under the cursor so a line inserted next is
+    -- attributed to its side of a boundary. Only updates on real stitch lines,
+    -- so it survives the cursor landing on a freshly-inserted (unanchored) line.
+    intent.note_cursor(buf, { filename = rec.filename, lnum = rec.lnum })
   end
 end
 
@@ -339,7 +339,7 @@ local function decorate(buf, st, rows)
         local hrow = row
         while hrow - 1 >= 1 and not rows[hrow] do
           local tagged = intent.tag(buf, hrow - 1)
-          if tagged and tagged ~= info.filename then
+          if tagged and tagged.filename and tagged.filename ~= info.filename then
             break
           end
           hrow = hrow - 1
@@ -506,6 +506,7 @@ function M.open(source)
     for _, ml in ipairs(f.match_lnums) do
       f.levels[ml] = config.options.context or 0
     end
+    f.pinned = {} -- lnums the user inserted/edited, kept visible at any context
     files[#files + 1] = f
     by_name[f.filename] = f
   end

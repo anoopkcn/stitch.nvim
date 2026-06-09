@@ -31,12 +31,15 @@ local function resolve_filename(item)
   return nil
 end
 
---- Expand each match by its own context level, clamp to the file, and merge
---- overlapping/adjacent ranges. Returns a list of { s, e } (inclusive, 1-based).
+--- Expand each match by its own context level, add each pinned line as a unit
+--- range (lines the user inserted/edited, kept visible at any context), clamp to
+--- the file, and merge overlapping/adjacent ranges. Returns a list of { s, e }
+--- (inclusive, 1-based).
 --- @param match_lnums integer[] sorted match line numbers
 --- @param levels table<integer,integer> lnum -> context level
 --- @param line_count integer
-function M.blocks_from_levels(match_lnums, levels, line_count)
+--- @param pinned table<integer,true>|nil lnums to always show (zero context)
+function M.blocks_from_levels(match_lnums, levels, line_count, pinned)
   local ranges = {}
   for _, ml in ipairs(match_lnums) do
     local n = levels[ml] or 0
@@ -46,7 +49,20 @@ function M.blocks_from_levels(match_lnums, levels, line_count)
       ranges[#ranges + 1] = { s = s, e = e }
     end
   end
-  -- match_lnums is sorted, so ranges are sorted by start.
+  if pinned then
+    for lnum in pairs(pinned) do
+      if lnum >= 1 and lnum <= line_count then
+        ranges[#ranges + 1] = { s = lnum, e = lnum }
+      end
+    end
+  end
+  -- Matches arrive sorted but pinned lines interleave, so sort before merging.
+  table.sort(ranges, function(a, b)
+    if a.s ~= b.s then
+      return a.s < b.s
+    end
+    return a.e < b.e
+  end)
   local blocks = {}
   for _, r in ipairs(ranges) do
     local last = blocks[#blocks]
@@ -67,7 +83,7 @@ end
 function M.materialize(file_src, levels)
   local lines = read_lines(file_src.filename, file_src.bufnr)
   local blocks = {}
-  for _, range in ipairs(M.blocks_from_levels(file_src.match_lnums, levels, file_src.line_count)) do
+  for _, range in ipairs(M.blocks_from_levels(file_src.match_lnums, levels, file_src.line_count, file_src.pinned)) do
     local block_lines = {}
     for lnum = range.s, range.e do
       local match = file_src.matches[lnum]
@@ -97,9 +113,12 @@ end
 --- Each edit is { l0, oldcount, newcount }: source lines [l0, l0+oldcount-1]
 --- (1-based) were replaced by `newcount` lines (oldcount=0 ⇒ pure insertion at
 --- l0). Matches on deleted lines are dropped; matches below an edit shift by the
---- net line delta. Keeps match_lnums, matches, line_count, and (if present)
---- levels consistent so a repaint from the now-saved source is correct.
---- @param file table view file (match_lnums, matches, levels?, line_count)
+--- net line delta. The newly written lines of each edit are pinned so they stay
+--- visible after the repaint (they aren't matches and context 0 wouldn't show
+--- them); existing pins are rebased the same way matches are. Keeps match_lnums,
+--- matches, pinned, line_count, and (if present) levels consistent so a repaint
+--- from the now-saved source is correct.
+--- @param file table view file (match_lnums, matches, levels?, pinned?, line_count)
 --- @param edits table[]
 function M.shift_file(file, edits)
   table.sort(edits, function(a, b)
@@ -111,7 +130,7 @@ function M.shift_file(file, edits)
       local last = e.l0 + e.oldcount - 1
       if e.oldcount > 0 and lnum >= e.l0 and lnum <= last then
         if e.newcount == 0 then
-          return nil -- the match's own line was deleted
+          return nil -- the line itself was deleted
         end
         return out - (lnum - e.l0) -- snap to the edited region's new start
       elseif lnum > last then
@@ -138,11 +157,30 @@ function M.shift_file(file, edits)
   if nlevels then
     file.levels = nlevels
   end
-  local total = 0
-  for _, e in ipairs(edits) do
-    total = total + (e.newcount - e.oldcount)
+
+  -- Rebase existing pins (real lines that moved), then pin each edit's newly
+  -- written region. The region starts at `l0` shifted only by the edits *above*
+  -- it (a running delta) — not shift(l0), which would land on the displaced line
+  -- after the region. delta ends at the net line change for line_count below.
+  local npinned = {}
+  if file.pinned then
+    for lnum in pairs(file.pinned) do
+      local nl = shift(lnum)
+      if nl then
+        npinned[nl] = true
+      end
+    end
   end
-  file.line_count = math.max(0, file.line_count + total)
+  local delta = 0
+  for _, e in ipairs(edits) do
+    local new_start = e.l0 + delta
+    for l = new_start, new_start + e.newcount - 1 do
+      npinned[l] = true
+    end
+    delta = delta + (e.newcount - e.oldcount)
+  end
+  file.pinned = npinned
+  file.line_count = math.max(0, file.line_count + delta)
 end
 
 --- Build a per-file source model from quickfix-style items.

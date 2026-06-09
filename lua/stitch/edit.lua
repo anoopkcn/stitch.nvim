@@ -94,21 +94,34 @@ local function plan_hunk(hunk, origin, current, buf)
     end
     local before = (sa >= 1) and origin[sa] or nil
     local after = origin[sa + 1]
+    local has_before = before and before.lnum
+    local has_after = after and after.lnum
     local ref, l0
-    if before and before.lnum then
-      if after and after.lnum and after.filename ~= before.filename then
-        -- File boundary: join the file the line was created in (intent), else
-        -- default to the following file. (`o` below the file above and `O` above
-        -- the file below produce the same buffer; intent is the only signal.)
-        if intent.at(buf, sb - 1) == before.filename then
-          ref, l0 = before, before.lnum + 1 -- append to the file above
-        else
-          ref, l0 = after, after.lnum -- prepend to the file below
-        end
-      else
+    if has_before and has_after then
+      -- Contiguous neighbours (same file, adjacent lines) leave no ambiguity:
+      -- appending after `before` and prepending before `after` are the same edit.
+      -- A gap between them — a block boundary (context 0) or a file boundary —
+      -- makes it ambiguous: `o` below `before` and `O` above `after` produce the
+      -- identical buffer, so the line the cursor was on when it was opened (its
+      -- insertion intent) is the only signal for which side it joins.
+      local contiguous = before.filename == after.filename and after.lnum == before.lnum + 1
+      if contiguous then
         ref, l0 = before, before.lnum + 1
+      else
+        local want = intent.at(buf, sb - 1)
+        if want and want.filename == after.filename and want.lnum == after.lnum then
+          ref, l0 = after, after.lnum -- `O` above `after`: prepend to its side
+        elseif want and want.filename == before.filename and want.lnum == before.lnum then
+          ref, l0 = before, before.lnum + 1 -- `o` below `before`: append to its side
+        elseif before.filename ~= after.filename then
+          ref, l0 = after, after.lnum -- file boundary, intent unknown: join the file below
+        else
+          ref, l0 = before, before.lnum + 1 -- same-file gap, intent unknown: keep with the block above
+        end
       end
-    elseif after and after.lnum then
+    elseif has_before then
+      ref, l0 = before, before.lnum + 1
+    elseif has_after then
       ref, l0 = after, after.lnum -- inserting above the very first source line
     else
       return {}, brow

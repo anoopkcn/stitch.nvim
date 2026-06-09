@@ -29,7 +29,8 @@ local function row_lang(buf, map, row)
   if info and info.filename then
     return srclang.ts_lang(info.filename), (info.first_in_file or info.block_divider) == true
   end
-  return srclang.ts_lang(intent.at(buf, row)), false
+  local ref = intent.at(buf, row)
+  return srclang.ts_lang(ref and ref.filename or nil), false
 end
 
 -- Recompute each language's included regions (one region per contiguous
