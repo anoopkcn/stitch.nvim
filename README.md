@@ -4,8 +4,9 @@ Stitches are portions of text belonging to a file.
 
 View 'stitches' from many files in a single buffer and edit them as if they belong to a single buffer.
 
-- stitches can be search results, diffs, LSP references, or diagnostics,
+- stitches can be search results, diffs, LSP references, diagnostics or quickfix results
 - read/edit and push changes back to the buffers, and jump straight to any source line.
+- expand or collapse context around a stitch
 
 ![disply_img](https://github.com/user-attachments/assets/c7073180-f345-45d8-90d1-d9e4f9ae00dc)
 
@@ -16,7 +17,7 @@ View 'stitches' from many files in a single buffer and edit them as if they belo
 
 ## Install
 
-The plugin works out of the box — no `setup()` call required.
+The plugin works out of the box, no `setup()` call required.
 
 
 ```lua
