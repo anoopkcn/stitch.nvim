@@ -14,6 +14,7 @@
 -- changed, or a repaint) shifts the block ranges and re-applies the regions.
 local config = require('stitch.config')
 local render = require('stitch.render')
+local reconcile = require('stitch.reconcile')
 local intent = require('stitch.intent')
 local srclang = require('stitch.lang')
 
@@ -24,10 +25,11 @@ local hl_ns = vim.api.nvim_create_namespace('stitch_highlight')
 -- Language of buffer row `row` (0-based) and whether it begins a new block.
 -- Existing rows take the language of their source file; an inserted line takes
 -- the language of the file it is joining (its insert intent).
-local function row_lang(buf, map, row)
+local function row_lang(buf, map, bounds, row)
   local info = map[row + 1]
   if info and info.filename then
-    return srclang.ts_lang(info.filename), (info.first_in_file or info.block_divider) == true
+    local b = bounds[row + 1]
+    return srclang.ts_lang(info.filename), b ~= nil and (b.first_in_file or b.block_divider) == true
   end
   local ref = intent.at(buf, row)
   return srclang.ts_lang(ref and ref.filename or nil), false
@@ -41,6 +43,7 @@ local function update_regions(buf, st)
   if not map then
     return
   end
+  local bounds = reconcile.layout_bounds(map)
   local line_count = vim.api.nvim_buf_line_count(buf)
 
   local by_lang = {}
@@ -54,7 +57,7 @@ local function update_regions(buf, st)
     cur_lang, cur_start = nil, nil
   end
   for row = 1, line_count - 1 do -- row 0 is the spacer
-    local lang, boundary = row_lang(buf, map, row)
+    local lang, boundary = row_lang(buf, map, bounds, row)
     if lang ~= cur_lang or boundary then
       flush(row - 1)
       cur_lang, cur_start = lang, row

@@ -244,9 +244,6 @@ local function build_infos(st)
           annotation = line.annotation,
           is_match = line.is_match,
           spans = line.spans,
-          first_in_file = (bi == 1 and li == 1),
-          is_first_file = (fi == 1),
-          block_divider = (bi > 1 and li == 1),
         }
       end
     end
@@ -301,9 +298,15 @@ local function decorate(buf, st, rows)
   vim.api.nvim_buf_clear_namespace(buf, match_ns, 0, -1)
   st.marks = {}
 
+  -- Header/divider placement is derived from the *live* row adjacency, not from
+  -- flags baked at paint: deleting a file's or block's first displayed line must
+  -- promote the new top row to carry the header/divider instead of losing it.
+  local bounds = reconcile.layout_bounds(rows)
+
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   for row = 0, #lines - 1 do
     local info = rows[row + 1]
+    local b = bounds[row + 1]
     if row == 0 then -- the spacer: no decoration
     elseif not info then
       -- Inserted line (no source yet): tag it with the file being edited (so a
@@ -335,7 +338,7 @@ local function decorate(buf, st, rows)
         })
       end
 
-      if info.first_in_file and info.is_first_file then
+      if b and b.first_in_file and b.is_first_file then
         -- virt_lines don't render *above* line 0, so show the first file's header
         -- on the row-0 spacer itself rather than leaving that line blank.
         vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
@@ -343,7 +346,7 @@ local function decorate(buf, st, rows)
           virt_text_pos = 'overlay',
           line_hl_group = 'StitchHeaderBg', -- belt-and-suspenders full-width fill
         })
-      elseif info.first_in_file then
+      elseif b and b.first_in_file then
         -- New lines inserted directly above this file's first line join this file
         -- (and prepend on save) only if they were created while editing it, so
         -- anchor the header above those. A line created while editing the file
@@ -358,11 +361,11 @@ local function decorate(buf, st, rows)
         end
         vim.api.nvim_buf_set_extmark(buf, ns, hrow, 0, {
           right_gravity = false,
-          virt_lines = file_header(info.relname, info.is_first_file),
+          virt_lines = file_header(info.relname, b.is_first_file),
           virt_lines_above = true,
           virt_lines_overflow = 'trunc', -- clip the bar's pad to the window width
         })
-      elseif info.block_divider then
+      elseif b and b.block_divider then
         -- A line opened directly above this block's first line joins this block
         -- (and is written into it) only when its insertion intent points here —
         -- the cursor was on this block when the line was opened. Anchor the

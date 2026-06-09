@@ -33,12 +33,19 @@ function M.compute(snapshot, current, origin)
   local si, ci = 1, 1 -- 1-based snapshot / current positions
   for _, h in ipairs(hunks) do
     local sa, ca, sb, cb = h[1], h[2], h[3], h[4]
-    while ci < sb do -- identical region before the hunk; si and ci move together
+    -- The current row where this hunk's change begins. vim.diff is asymmetric:
+    -- for insert/replace start_b is the first *changed* b-row, but for a pure
+    -- deletion (cb == 0) it is the last *kept* b-row (the gap follows it). Without
+    -- this normalization the prefix loop under-copies by one on a deletion and the
+    -- `si + ca` advance then skips the kept origin, mis-mapping the deleted line's
+    -- origin onto the preceding row (wrong gutter / dropped header).
+    local change_b = (cb == 0) and (sb + 1) or sb
+    while ci < change_b do -- identical region before the hunk; si and ci move together
       map[ci] = origin[si] or false
       si, ci = si + 1, ci + 1
     end
     for k = 0, cb - 1 do -- changed region: top-align new rows with the old ones
-      map[sb + k] = (k < ca and origin[si + k]) or false
+      map[change_b + k] = (k < ca and origin[si + k]) or false
     end
     -- Advance the running pointer by the hunk's old-row count from wherever the
     -- identical-region loop left it. NB: si == sa only when ca > 0; for a pure
@@ -47,13 +54,37 @@ function M.compute(snapshot, current, origin)
     -- harmless because `si + k` is never read when ca == 0 (the `k < ca` guard is
     -- false) — but the advance must be `si + ca`, not `sa + ca`. Don't "simplify"
     -- to absolute sa addressing: it breaks insertions.
-    si, ci = si + ca, sb + cb
+    si, ci = si + ca, change_b + cb
   end
   while ci <= #current do -- identical tail
     map[ci] = origin[si] or false
     si, ci = si + 1, ci + 1
   end
   return { map = map, hunks = hunks }
+end
+
+--- Derive each row's layout role from the *live* adjacency of `rows` (rows[i] is
+--- the source info for current row i, or false for the spacer / an inserted line).
+--- Returns bounds[i] = { first_in_file?, is_first_file?, block_divider? } for the
+--- rows that begin a file or a non-contiguous block; nil otherwise. Computed live
+--- (not baked at paint) so a deletion of a file/block's first displayed line
+--- promotes the new top row to carry the header/divider instead of losing it.
+--- @param rows table[] info-or-false per current row (1-based)
+function M.layout_bounds(rows)
+  local bounds = {}
+  local prev -- the previous row's source info
+  for i = 1, #rows do
+    local info = rows[i]
+    if info and info.lnum then
+      if not prev or prev.filename ~= info.filename then
+        bounds[i] = { first_in_file = true, is_first_file = (prev == nil) }
+      elseif info.lnum ~= prev.lnum + 1 then
+        bounds[i] = { block_divider = true }
+      end
+      prev = info
+    end
+  end
+  return bounds
 end
 
 return M
