@@ -8,7 +8,7 @@ View 'stitches' from many files in a single buffer and edit them as if they belo
 - read/edit and push changes back to the buffers, and jump straight to any source line.
 - expand or collapse context around a stitch
 
-![disply_img](https://github.com/user-attachments/assets/c7073180-f345-45d8-90d1-d9e4f9ae00dc)
+![disply_img](https://github.com/user-attachments/assets/34bc7e20-e772-40de-a843-08b34897f2b3)
 
 ## Requirements
 
