@@ -48,17 +48,16 @@ local function setup_highlights()
   local set = function(name, val)
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', val, { default = true }))
   end
-  -- File headers carry a subtle full-width background bar with the path dimmed
-  -- onto it. The directory and file name are *resolved* against the bar background
-  -- (not linked, since a link can't combine a fg with a separate bg) and
-  -- re-resolved by the ColorScheme autocmd below.
+  -- File headers are plain text carrying a hairline underline, the whole
+  -- path dimmed. The groups are *resolved* (not linked, since a link can't
+  -- combine a fg with underline attributes) and re-resolved by the
+  -- ColorScheme autocmd below.
   local function attr(group, key)
     return (vim.api.nvim_get_hl(0, { name = group, link = false }) or {})[key]
   end
-  local hbg = attr('CursorLine', 'bg') or attr('Visual', 'bg')
-  set('StitchHeaderBg', { bg = hbg }) -- the bar fill past the text
-  set('StitchHeaderDir', { fg = attr('Comment', 'fg'), bg = hbg }) -- dimmed directory
-  set('StitchHeaderName', { fg = attr('Comment', 'fg'), bg = hbg }) -- file name (also dimmed)
+  local usp = attr('NonText', 'fg') or attr('Comment', 'fg') -- the underline's colour
+  set('StitchHeaderDir', { fg = attr('Comment', 'fg'), underline = true, sp = usp })
+  set('StitchHeaderName', { fg = attr('Comment', 'fg'), underline = true, sp = usp })
 
   set('StitchLnum', { link = 'LineNr' })
   set('StitchContextLnum', { link = 'NonText' })
@@ -385,7 +384,6 @@ local function decorate(buf, st, rows, lines)
         vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
           virt_text = body,
           virt_text_pos = 'overlay',
-          line_hl_group = 'StitchHeaderBg', -- belt-and-suspenders full-width fill
         })
         st.gutter[1] = { k = 'header0', s = gut }
       elseif b and b.first_in_file then
@@ -401,14 +399,15 @@ local function decorate(buf, st, rows, lines)
           end
           hrow = hrow - 1
         end
-        -- A blank separator line (-2) above the bar (-1); the bar's leading path
-        -- columns ride its gutter (statuscol reads st.gutter at v:virtnum == -1).
+        -- A blank separator line (-2) above the header (-1); the header's
+        -- leading path columns ride its gutter (statuscol reads st.gutter at
+        -- v:virtnum == -1).
         local gut, body = chrome.header_parts(info.relname)
         vim.api.nvim_buf_set_extmark(buf, ns, hrow, 0, {
           right_gravity = false,
           virt_lines = { { { '', 'StitchSeparator' } }, body },
           virt_lines_above = true,
-          virt_lines_overflow = 'trunc', -- clip the bar's pad to the window width
+          virt_lines_overflow = 'trunc', -- clip an over-wide path instead of wrapping
         })
         st.gutter[hrow + 1] = { k = 'header', s = gut }
       elseif b and b.block_divider then

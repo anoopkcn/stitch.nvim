@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stitch.nvim — header style proposals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* page chrome */
+    --page-bg: #0c0d10;
+    --page-fg: #b7bcc7;
+    --page-dim: #565d6b;
+    --page-line: #1d2026;
+    --accent: #61afef;
+
+    /* mock editor theme (neutral dark, OneDark-adjacent) */
+    --ed-bg: #181a20;
+    --ed-fg: #c8ccd4;
+    --ed-comment: #5d6470;
+    --ed-bar: #242833;          /* CursorLine bg — the current header bar */
+    --ed-lnum: #8a93a5;         /* match line number */
+    --ed-lnum-ctx: #3a404d;     /* context line number (NonText) */
+    --ed-kw: #c678dd;
+    --ed-str: #98c379;
+    --ed-fn: #61afef;
+    --ed-match: rgba(97, 175, 239, .16);
+    --ed-rule: #2c313d;         /* hairline / NonText-ish */
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { background: var(--page-bg); }
+
+  body {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    color: var(--page-fg);
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+    padding: 56px 40px 120px;
+    position: relative;
+  }
+
+  /* film grain */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    opacity: .035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .wrap { max-width: 1280px; margin: 0 auto; }
+
+  /* ---------- masthead ---------- */
+  header.masthead {
+    border-bottom: 1px solid var(--page-line);
+    padding-bottom: 36px;
+    margin-bottom: 56px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .masthead .kicker {
+    font-size: 11px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--page-dim);
+    margin-bottom: 14px;
+  }
+  .masthead .kicker b { color: var(--accent); font-weight: 500; }
+  .masthead h1 {
+    font-family: "Instrument Serif", serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: clamp(36px, 5vw, 56px);
+    line-height: 1.05;
+    color: #e8eaf0;
+    letter-spacing: .01em;
+  }
+  .masthead h1 .mono {
+    font-family: "JetBrains Mono", monospace;
+    font-style: normal;
+    font-size: .62em;
+    color: var(--page-dim);
+    vertical-align: .12em;
+  }
+  .masthead .lede {
+    max-width: 44ch;
+    color: var(--page-dim);
+    font-size: 12.5px;
+  }
+  .masthead .lede em { color: var(--page-fg); font-style: normal; }
+
+  /* ---------- grid of proposals ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+    gap: 48px 40px;
+  }
+  @media (max-width: 580px) { .grid { grid-template-columns: 1fr; } }
+
+  .proposal { animation: rise .5s ease both; }
+  .proposal:nth-child(1) { animation-delay: .03s }
+  .proposal:nth-child(2) { animation-delay: .08s }
+  .proposal:nth-child(3) { animation-delay: .13s }
+  .proposal:nth-child(4) { animation-delay: .18s }
+  .proposal:nth-child(5) { animation-delay: .23s }
+  .proposal:nth-child(6) { animation-delay: .28s }
+  .proposal:nth-child(7) { animation-delay: .33s }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+
+  .proposal-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .proposal-head .num {
+    font-size: 26px;
+    font-weight: 700;
+    color: #262b35;
+    letter-spacing: -.04em;
+  }
+  .proposal-head h2 {
+    font-size: 14px;
+    font-weight: 700;
+    color: #e8eaf0;
+    letter-spacing: .02em;
+  }
+  .proposal-head .tag {
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid rgba(97,175,239,.35);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .proposal-head .tag.ref { color: var(--page-dim); border-color: var(--page-line); }
+
+  .proposal .why {
+    color: var(--page-dim);
+    font-size: 12px;
+    max-width: 62ch;
+    margin-bottom: 16px;
+    min-height: 3.1em;
+  }
+  .proposal .why em { color: var(--page-fg); font-style: normal; }
+
+  /* ---------- mock editor window ---------- */
+  .editor {
+    background: var(--ed-bg);
+    border: 1px solid #23262e;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 18px 48px -22px rgba(0,0,0,.85);
+    cursor: pointer;
+    transition: border-color .18s ease, transform .18s ease;
+    position: relative;
+  }
+  .editor:hover { border-color: #353b48; transform: translateY(-2px); }
+  .proposal.picked .editor { border-color: var(--accent); }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    background: #14161b;
+    border-bottom: 1px solid #20232b;
+    font-size: 11px;
+    color: var(--page-dim);
+  }
+  .titlebar .dots { display: flex; gap: 6px; }
+  .titlebar .dots i { width: 9px; height: 9px; border-radius: 50%; background: #2a2e38; }
+  .titlebar .bufname { margin-left: 6px; }
+  .titlebar .pick-state {
+    margin-left: auto;
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #353b48;
+    transition: color .15s;
+  }
+  .proposal.picked .pick-state { color: var(--accent); }
+
+  .buffer {
+    padding: 10px 0 14px;
+    font-size: 12.5px;
+    line-height: 1.75;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .row { display: flex; min-width: max-content; }
+  .gut {
+    flex: 0 0 6ch;
+    text-align: right;
+    padding-right: 1ch;
+    color: var(--ed-lnum-ctx);
+    user-select: none;
+  }
+  .gut.m { color: var(--ed-lnum); }
+  .txt { flex: 1 1 auto; padding-right: 2ch; }
+
+  /* editor syntax */
+  .c  { color: var(--ed-comment); }
+  .k  { color: var(--ed-kw); }
+  .s  { color: var(--ed-str); }
+  .f  { color: var(--ed-fn); }
+  .fg { color: var(--ed-fg); }
+  .match { background: var(--ed-match); border-radius: 2px; }
+
+  .divider .gut { color: var(--ed-rule); }
+
+  /* ---------- header treatments ---------- */
+  .hdr { display: flex; min-width: max-content; }
+  .hdr .dir  { color: var(--ed-comment); }
+  .hdr .name { color: var(--ed-comment); }
+
+  /* 00 current + 01: full-width bar */
+  .hdr.bar { background: var(--ed-bar); }
+  .hdr.bar .lead { flex: 0 0 0; }
+
+  /* 01 bright name */
+  .hdr.brightname .name { color: var(--ed-fg); }
+
+  /* 02 pure type */
+  .hdr.puretype .name { color: var(--ed-fg); font-weight: 700; }
+
+  /* 03 hairline */
+  .hdr.hairline .name { color: var(--ed-fg); }
+  .hdr.hairline .rule {
+    flex: 1 1 auto;
+    color: var(--ed-rule);
+    overflow: hidden;
+    margin-left: 1ch;
+  }
+
+  /* 04 accent edge */
+  .hdr.accent .edge { color: var(--accent); }
+  .hdr.accent .name { color: var(--ed-fg); }
+
+  /* 05 name chip */
+  .hdr.chip .chipbg {
+    background: var(--ed-bar);
+    color: var(--ed-fg);
+  }
+  .hdr.chip .dir { color: var(--ed-comment); }
+
+  /* 06 underline */
+  .hdr.uline .dir,
+  .hdr.uline .name {
+    text-decoration: underline;
+    text-decoration-color: var(--ed-rule);
+    text-underline-offset: 5px;
+    text-decoration-thickness: 1px;
+  }
+  .hdr.uline .name { color: var(--ed-fg); }
+
+  /* ---------- implementation note ---------- */
+  .impl {
+    margin-top: 12px;
+    font-size: 11px;
+    color: #454c59;
+    border-left: 2px solid var(--page-line);
+    padding-left: 12px;
+  }
+  .impl code { color: var(--page-dim); }
+
+  /* ---------- shortlist bar ---------- */
+  .shortlist {
+    position: fixed;
+    bottom: 20px; right: 24px;
+    z-index: 60;
+    background: #14161b;
+    border: 1px solid #23262e;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 11.5px;
+    color: var(--page-dim);
+    box-shadow: 0 12px 32px -12px rgba(0,0,0,.9);
+  }
+  .shortlist b { color: var(--accent); font-weight: 500; }
+
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--page-line);
+    color: #3a404d;
+    font-size: 11px;
+    letter-spacing: .06em;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div>
+      <div class="kicker">stitch.nvim <b>/</b> design review <b>/</b> file headers</div>
+      <h1>Six minimal headers <span class="mono">·</span> one view</h1>
+    </div>
+    <p class="lede">
+      Every pane below renders the <em>same</em> stitch buffer — a grep for
+      <em>“header”</em> — with a different file-header treatment.
+      Click a pane to shortlist it. <em>00</em> is the current style, kept as
+      the baseline.
+    </p>
+  </header>
+
+  <div class="grid" id="grid"></div>
+
+  <footer>generated for review · stitch.nvim · colours derive from CursorLine / Comment / Normal / NonText so every style stays theme-adaptive</footer>
+</div>
+
+<div class="shortlist" id="shortlist">shortlist: <b>none yet</b> — click a pane</div>
+
+<script>
+/* ----- the shared buffer content (one grep view, reused by every pane) ----- */
+
+const FILE1 = { dir: 'lua/stitch/', name: 'render.lua' };
+const FILE2 = { dir: 'lua/stitch/', name: 'chrome.lua' };
+
+const esc = s => s; // content below is hand-escaped HTML
+
+const LINES_1A = [
+  { n: 57, m: false, html: `  <span class="k">local</span> hbg = <span class="f">attr</span>(<span class="s">'CursorLine'</span>, <span class="s">'bg'</span>) <span class="k">or</span> <span class="f">attr</span>(<span class="s">'Visual'</span>, <span class="s">'bg'</span>)` },
+  { n: 58, m: true,  html: `  <span class="f">set</span>(<span class="s">'Stitch<span class="match">Header</span>Bg'</span>, { bg = hbg }) <span class="c">-- the bar fill past the text</span>` },
+  { n: 59, m: false, html: `  <span class="f">set</span>(<span class="s">'StitchHeaderDir'</span>, { fg = <span class="f">attr</span>(<span class="s">'Comment'</span>, <span class="s">'fg'</span>), bg = hbg })` },
+];
+const LINES_1B = [
+  { n: 82, m: false, html: `<span class="f">setup_highlights</span>()` },
+  { n: 83, m: true,  html: `<span class="c">-- :colorscheme clears user groups, so re-resolve the <span class="match">header</span> colours after.</span>` },
+  { n: 84, m: false, html: `vim.api.<span class="f">nvim_create_autocmd</span>(<span class="s">'ColorScheme'</span>, { callback = setup_highlights })` },
+];
+const LINES_2 = [
+  { n: 79, m: true,  html: `<span class="c">-- The <span class="match">header</span> label chunks on the bar: directory and file name, both dimmed.</span>` },
+  { n: 80, m: false, html: `<span class="k">local</span> <span class="k">function</span> <span class="f">header_chunks</span>(relname)` },
+  { n: 81, m: false, html: `  <span class="k">local</span> dir, base = relname:<span class="f">match</span>(<span class="s">'^(.*/)([^/]+)$'</span>)` },
+];
+
+/* ----- header renderers: file → one (or two) row(s) of HTML ----- */
+
+const PAD = ' '.repeat(200);
+const RULE = '─'.repeat(200);
+
+const styles = [
+  {
+    id: 'current', num: '00', name: 'Current', tag: 'reference', refTag: true,
+    why: 'Full-width <em>CursorLine</em> bar; directory and file name both dimmed to <em>Comment</em>. Reads as one grey slab — the name doesn’t pop.',
+    impl: '<code>StitchHeaderBg</code> = CursorLine bg · <code>StitchHeaderDir</code>/<code>Name</code> = Comment fg on the bar',
+    header: f => `<div class="hdr bar"><span class="dir">${f.dir}</span><span class="name">${f.name}</span><span style="color:transparent">${PAD}</span></div>`,
+  },
+  {
+    id: 'brightname', num: '01', name: 'Bar, lifted name', tag: 'smallest diff',
+    why: 'Keep the bar exactly as-is, but resolve the file name to <em>Normal</em> fg. The eye lands on the name first; the directory stays quiet. A one-line change.',
+    impl: '<code>StitchHeaderName</code> fg → <code>Normal</code> fg (bar + dir untouched)',
+    header: f => `<div class="hdr bar brightname"><span class="dir">${f.dir}</span><span class="name">${f.name}</span><span style="color:transparent">${PAD}</span></div>`,
+  },
+  {
+    id: 'puretype', num: '02', name: 'Pure type, no bar', tag: 'most minimal',
+    why: 'Drop the background entirely. Bold <em>Normal</em>-fg name, dimmed directory, whitespace does the separating. The quietest possible chrome — nothing competes with code.',
+    impl: 'drop <code>line_hl_group</code> + the 400-col pad · <code>StitchHeaderName</code> = Normal fg, <code>bold</code>',
+    header: f => `<div class="hdr puretype"><span class="dir">${f.dir}</span><span class="name">${f.name}</span></div>`,
+  },
+  {
+    id: 'hairline', num: '03', name: 'Hairline rule', tag: 'suggested',
+    why: 'Path on the left, a thin <em>─</em> rule running to the window edge — the fold-text / picker idiom. Keeps the full-width anchor of the bar without its weight.',
+    impl: 'replace the bg pad with <code>─</code> repeat in a <code>NonText</code>-ish group; no bg groups needed',
+    header: f => `<div class="hdr hairline"><span class="dir">${f.dir}</span><span class="name">${f.name}</span><span class="rule">${RULE}</span></div>`,
+  },
+  {
+    id: 'accent', num: '04', name: 'Accent edge', tag: 'most signal',
+    why: 'A single <em>▍</em> in the (line-number-less) gutter marks the section; the path itself stays plain. The only colour on the page, so file boundaries scan instantly.',
+    impl: '<code>▍</code> drawn by statuscol at the header row · accent fg from <code>StitchMatch</code>’s blue (theme-blended)',
+    header: f => `<div class="hdr accent"><span class="edge">▍ </span><span class="dir">${f.dir}</span><span class="name">${f.name}</span></div>`,
+  },
+  {
+    id: 'chip', num: '05', name: 'Name chip', tag: 'text-width bar',
+    why: 'The bar shrinks to fit the file name only — a quiet chip — with the directory plain beside it. Background where it means something, nowhere else.',
+    impl: 'keep <code>StitchHeaderBg</code> behind the name chunk only; drop the pad + <code>line_hl_group</code>',
+    header: f => `<div class="hdr chip"><span class="dir">${f.dir}</span><span class="chipbg">&nbsp;${f.name}&nbsp;</span></div>`,
+  },
+  {
+    id: 'uline', num: '06', name: 'Underline title', tag: 'zero layout change',
+    why: 'No bar, no extra glyphs — the path simply carries a hairline <em>underline</em>. Pure highlight-attribute change; the layout code doesn’t move at all.',
+    impl: '<code>underline = true</code> + <code>sp =</code> NonText fg on both header groups; bg dropped',
+    header: f => `<div class="hdr uline"><span class="dir">${f.dir}</span><span class="name">${f.name}</span></div>`,
+  },
+];
+
+/* ----- pane assembly ----- */
+
+const row = (gut, txt, cls = '') =>
+  `<div class="row ${cls}"><span class="gut${cls.includes('m') ? ' m' : ''}">${gut}</span><span class="txt">${txt}</span></div>`;
+
+const codeRow = l => row(l.n, l.html, l.m ? 'm' : '');
+
+function pane(style) {
+  const hdr = f => `<div class="row"><span class="txt" style="padding-left:0">${style.header(f)}</span></div>`;
+  const blank = row('', '');
+  return `
+  <section class="proposal" data-id="${style.id}">
+    <div class="proposal-head">
+      <span class="num">${style.num}</span>
+      <h2>${style.name}</h2>
+      <span class="tag${style.refTag ? ' ref' : ''}">${style.tag}</span>
+    </div>
+    <p class="why">${style.why}</p>
+    <div class="editor" title="click to shortlist">
+      <div class="titlebar">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="bufname">[Stitch] grep: header</span>
+        <span class="pick-state">shortlisted ✓</span>
+      </div>
+      <div class="buffer">${
+        hdr(FILE1) +
+        LINES_1A.map(codeRow).join('') +
+        row('    ⋮ ', '', 'divider') +
+        LINES_1B.map(codeRow).join('') +
+        blank +
+        hdr(FILE2) +
+        LINES_2.map(codeRow).join('')
+      }</div>
+    </div>
+    <p class="impl">${style.impl}</p>
+  </section>`;
+}
+
+document.getElementById('grid').innerHTML = styles.map(pane).join('');
+
+/* ----- shortlist interaction ----- */
+
+const picked = new Set();
+document.querySelectorAll('.proposal .editor').forEach(ed => {
+  ed.addEventListener('click', () => {
+    const p = ed.closest('.proposal');
+    const id = p.dataset.id;
+    picked.has(id) ? picked.delete(id) : picked.add(id);
+    p.classList.toggle('picked');
+    const names = [...picked].map(id => {
+      const s = styles.find(s => s.id === id);
+      return `${s.num} ${s.name}`;
+    });
+    document.getElementById('shortlist').innerHTML =
+      'shortlist: ' + (names.length ? `<b>${names.join('</b> · <b>')}</b>` : '<b>none yet</b> — click a pane');
+  });
+});
+</script>
+</body>
+</html>

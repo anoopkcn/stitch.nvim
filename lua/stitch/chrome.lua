@@ -1,6 +1,6 @@
 -- The view's chrome: the ready-to-draw strings and chunk lists for everything
 -- painted *around* stitch text — the source-line-number gutter cells, the
--- file-header bar, and the `⋮` block divider.
+-- underlined file-header path, and the `⋮` block divider.
 --
 -- Pure string building: no state, no buffer access (only strdisplaywidth for
 -- display-column math), so the fiddly parts — a wide glyph straddling the
@@ -19,11 +19,6 @@ M.GUTTER = string.rep(' ', 6)
 -- The gutter cell for a block divider: the dim `⋮` aligned under the line
 -- numbers (column 4, where single-digit numbers sit).
 M.DIVIDER_GUTTER = '%#StitchSeparator#    ⋮ %*'
-
--- A wide invariant pad that fills the header background bar to the window edge
--- (nowrap + trunc clip the overflow). Hoisted out of header_parts so it isn't
--- re-allocated for every header on every decorate.
-local HEADER_PAD = string.rep(' ', 400)
 
 -- Take the prefix of `s` spanning the first `n` display columns, plus the rest.
 -- Cuts on a character boundary, so a wide glyph that would straddle the cut goes
@@ -47,8 +42,10 @@ end
 
 -- Split a list of {text, hl} chunks at display column `width`. Returns the head as
 -- a `statuscolumn` string (each piece `%#hl#text`, with `%` escaped), padded with
--- bar bg to exactly `width`, plus the remaining chunks. Used to spill the start of
--- a file header into its otherwise-blank gutter so the path reads from column 0.
+-- plain spaces to exactly `width`, plus the remaining chunks. Used to spill the
+-- start of a file header into its otherwise-blank gutter so the path reads from
+-- column 0. The pad resets highlighting first (`%*`) so it doesn't extend the
+-- header's underline past the text.
 local function split_chunks(chunks, width)
   local head, tail, used = {}, {}, 0
   for _, c in ipairs(chunks) do
@@ -71,7 +68,7 @@ local function split_chunks(chunks, width)
     end
   end
   if used < width then
-    head[#head + 1] = '%#StitchHeaderBg#' .. string.rep(' ', width - used)
+    head[#head + 1] = '%*' .. string.rep(' ', width - used)
   end
   return table.concat(head) .. '%*', tail
 end
@@ -93,12 +90,9 @@ end
 --- Split a file header into (gutter statuscolumn string, body virt-text
 --- chunks). The first GUTTER columns of the path are drawn in the header
 --- row's gutter — which carries no line number — so the path starts at the
---- left edge; the body is the remainder plus a wide pad so the bar reaches
---- the window edge.
+--- left edge; the body is the remainder.
 function M.header_parts(relname)
-  local gut, body = split_chunks(header_chunks(relname), #M.GUTTER)
-  body[#body + 1] = { HEADER_PAD, 'StitchHeaderBg' }
-  return gut, body
+  return split_chunks(header_chunks(relname), #M.GUTTER)
 end
 
 --- The gutter cell for a source line: its number, right-aligned, brighter for

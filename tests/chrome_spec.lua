@@ -21,19 +21,19 @@ check('lnum_cell context', chrome.lnum_cell(7, false) == '%#StitchContextLnum#  
   chrome.lnum_cell(7, false))
 
 -- Header split: the first 6 display columns spill into the gutter string,
--- the rest become body chunks (plus the bar pad).
+-- the rest become body chunks.
 local gut, body = chrome.header_parts('a/b.lua')
 check('header gutter takes the first 6 columns',
   gut == '%#StitchHeaderDir#a/%#StitchHeaderName#b.lu%*', gut)
 check('header body continues where the gutter cut',
   body[1][1] == 'a' and body[1][2] == 'StitchHeaderName', body)
-check('header body ends with the bar pad',
-  body[#body][2] == 'StitchHeaderBg' and #body[#body][1] >= 400, body[#body])
+check('header body is just the path remainder (no pad)', #body == 1, body)
 
--- A path shorter than the gutter: padded with bar background to exactly 6.
+-- A path shorter than the gutter: padded with plain (non-underlined) spaces
+-- to exactly 6.
 local gut2 = chrome.header_parts('x.c')
 check('short header padded to gutter width',
-  gut2 == '%#StitchHeaderName#x.c%#StitchHeaderBg#   %*', gut2)
+  gut2 == '%#StitchHeaderName#x.c%*   %*', gut2)
 
 -- % in a path must be escaped in the statuscolumn string (it would otherwise
 -- be parsed as a statusline item) — gutter and not the body chunks (virt_text
@@ -46,7 +46,7 @@ check('percent kept literal in body chunks', vim.inspect(body3):find('%%%%') == 
 -- the gutter is padded to width instead.
 local gut4, body4 = chrome.header_parts('a日本語x.md')
 check('wide glyph never straddles the cut',
-  gut4 == '%#StitchHeaderName#a日本%#StitchHeaderBg# %*', gut4)
+  gut4 == '%#StitchHeaderName#a日本%* %*', gut4)
 check('straddling glyph starts the body', body4[1][1] == '語x.md', body4)
 
 -- Divider chrome.

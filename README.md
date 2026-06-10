@@ -68,7 +68,7 @@ Inside the view:
 `+`/`-` accept a count: `10+` reveals 10 lines at once.
 
 Each stitch shows its source line number in the gutter; each file is introduced
-by a full-width header bar showing the `dir/name` path, aligned to the left edge.
+by an underlined, dimmed `dir/name` header, aligned to the left edge.
 Diagnostics show their message as a trailing annotation.
 
 ## Configuration
@@ -95,9 +95,8 @@ require('stitch').setup({
 
 | Group                       | Default link |
 | --------------------------- | ------------ |
-| `StitchHeaderBg`      | `CursorLine` bg (the header bar) |
-| `StitchHeaderDir`     | `Comment` fg (dimmed directory on the bar) |
-| `StitchHeaderName`    | `Comment` fg (the file name on the bar, dimmed too) |
+| `StitchHeaderDir`     | `Comment` fg, underlined (the dimmed directory) |
+| `StitchHeaderName`    | `Comment` fg, underlined (the file name, dimmed too) |
 | `StitchLnum`          | `LineNr`     |
 | `StitchContextLnum`   | `NonText`    |
 | `StitchMatch`         | translucent blue bg |
