@@ -46,6 +46,17 @@ function M.diff(revspec)
   require('stitch.sources.diff').run(revspec, present)
 end
 
+--- Jump to the next stitch in the visible view: load its source buffer and
+--- land on the match's line/column. Wraps past the last stitch.
+function M.next()
+  require('stitch.nav').next()
+end
+
+--- Jump to the previous stitch in the visible view. Wraps past the first.
+function M.prev()
+  require('stitch.nav').prev()
+end
+
 --- Open a stitch view from the current quickfix list.
 function M.from_qflist()
   local qf = vim.fn.getqflist({ items = 1, title = 1 })

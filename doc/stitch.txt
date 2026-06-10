@@ -14,6 +14,7 @@ CONTENTS                                                  *stitch-contents*
     4.2 :Stitch references ............... |:Stitch-references|
     4.3 :Stitch diagnostics .............. |:Stitch-diagnostics|
     4.4 :Stitch qf ....................... |:Stitch-qf|
+    4.5 :Stitch next/prev ................ |:Stitch-next|
 5. The View ................................ |stitch-view|
 6. Mappings ................................ |stitch-mappings|
 7. Editing & Write-back .................... |stitch-editing|
@@ -84,7 +85,7 @@ source, edit lines in place and `:w` to save them back, or `q` to close.
 4. COMMANDS                                              *stitch-commands*
 
 All sources are reached through a single command with a subcommand: >
-    :Stitch {grep|references|diagnostics|diff|qf} [args]
+    :Stitch {grep|references|diagnostics|diff|qf|next|prev} [args]
 <
                                                                   *:Stitch*
 Tab-completion completes the subcommand name in the first argument position.
@@ -161,6 +162,24 @@ Uses the quickfix list exactly as it stands — populate it however you like
 (|:grep|, |:vimgrep|, |:cexpr|, another plugin) and turn it into a stitch
 view. Unlike the other sources, this does not replace the quickfix list. If
 the list is empty, a notification is shown.
+
+------------------------------------------------------------------------------
+4.6 :Stitch next / :Stitch prev              *:Stitch-next* *:Stitch-prev*
+
+Jump to the next/previous stitch: load its source buffer and land the cursor
+on the match's line and column. >
+    :Stitch next
+    :Stitch prev
+<
+Both work from anywhere — the view window or a source window. They walk the
+stitches of the view visible in the current tabpage (the most recently used
+one when several are showing), wrapping past either end. The view's cursor
+advances with each step, so the walk continues from wherever you last were
+in the view, and moving the view cursor by hand re-positions the walk.
+
+Unlike |:cnext| over the same set, these follow the live view: anchors move
+with edits, so the jump targets stay correct after the sources (or the view)
+have been edited. If no view is visible, a notification is shown.
 
 ==============================================================================
 5. THE VIEW                                                  *stitch-view*
@@ -532,6 +551,18 @@ stitch.from_qflist()
 
     Example: >
         require('stitch').from_qflist()
+<
+------------------------------------------------------------------------------
+                                          *stitch.next()* *stitch.prev()*
+stitch.next()
+stitch.prev()
+    Jump to the next/previous stitch in the visible view. Equivalent to
+    |:Stitch-next| / |:Stitch-prev|.
+
+    Example: >
+        require('stitch').next()
+        vim.keymap.set('n', ']s', require('stitch').next)
+        vim.keymap.set('n', '[s', require('stitch').prev)
 <
 ==============================================================================
 14. NOT IN SCOPE                                     *stitch-not-in-scope*

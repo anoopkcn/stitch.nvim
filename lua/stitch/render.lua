@@ -27,6 +27,11 @@ local ns = vim.api.nvim_create_namespace('stitch')
 -- }
 M.state = {}
 
+-- The most recently entered view buffer: nav's next/prev navigate it when
+-- several views are visible at once. Set on open and on BufEnter, cleared on
+-- wipeout.
+M.last_view = nil
+
 -- Namespace holding the anchor extmarks; the editor reads it to map edited
 -- lines back to their source location.
 M.ns = ns
@@ -551,6 +556,7 @@ function M.open(source)
   local buf = vim.api.nvim_create_buf(true, true)
   local st = { marks = {} }
   M.state[buf] = st
+  M.last_view = buf
 
   -- Live view state, mutated by expand/collapse and re-read on repaint. The
   -- visible ranges are derived from the matches exactly once, here; from then
@@ -589,6 +595,9 @@ function M.open(source)
     callback = function()
       intent.discard(buf)
       M.state[buf] = nil
+      if M.last_view == buf then
+        M.last_view = nil
+      end
     end,
   })
 
@@ -630,6 +639,7 @@ function M.open(source)
   vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter', 'CursorHold' }, {
     buffer = buf,
     callback = function()
+      M.last_view = buf -- every event here fires with the view current
       M.sync(buf)
     end,
   })

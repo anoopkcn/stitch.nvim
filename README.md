@@ -33,6 +33,8 @@ vim.pack.add({"https://github.com/anoopkcn/stitch.nvim"})
 :Stitch diff             " working-tree changes (git or jj)
 :Stitch diff <rev>       " everything changed since <rev>
 :Stitch qf               " build a view from the current quickfix list
+:Stitch next             " jump to the next stitch (loads the source buffer)
+:Stitch prev             " jump to the previous stitch
 ```
 
 Or from Lua:
@@ -43,7 +45,15 @@ require('stitch').references()
 require('stitch').diagnostics()
 require('stitch').diff()         -- or .diff('main')
 require('stitch').from_qflist()
+require('stitch').next()         -- and .prev()
 ```
+
+`next`/`prev` work from anywhere: they walk the stitches of the visible view
+(the most recently used one if several are open), load the stitch's source
+buffer and land the cursor on its line and column, wrapping at the ends. The
+view's cursor advances with each step, so the walk continues from wherever
+you last were in the view. Unlike `:cnext`, they follow the live view — line
+numbers stay correct after edits.
 
 Inside the view:
 

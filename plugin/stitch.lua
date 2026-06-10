@@ -3,7 +3,7 @@ if vim.g.loaded_stitch then
 end
 vim.g.loaded_stitch = true
 
-local subcommands = { 'grep', 'references', 'diagnostics', 'diff', 'qf' }
+local subcommands = { 'grep', 'references', 'diagnostics', 'diff', 'qf', 'next', 'prev' }
 
 vim.api.nvim_create_user_command('Stitch', function(opts)
   local sub = opts.fargs[1]
@@ -18,12 +18,16 @@ vim.api.nvim_create_user_command('Stitch', function(opts)
     mb.diff(table.concat(vim.list_slice(opts.fargs, 2), ' '))
   elseif sub == 'qf' then
     mb.from_qflist()
+  elseif sub == 'next' then
+    mb.next()
+  elseif sub == 'prev' then
+    mb.prev()
   else
     vim.notify('Stitch: unknown subcommand: ' .. tostring(sub), vim.log.levels.ERROR)
   end
 end, {
   nargs = '*',
-  desc = 'Open a stitch view (grep|references|diagnostics|diff|qf)',
+  desc = 'Open a stitch view (grep|references|diagnostics|diff|qf) or walk it (next|prev)',
   complete = function(arglead, line)
     -- Only complete the subcommand in the first argument position.
     if line:match('^%s*Stitch%s+%S*$') then
