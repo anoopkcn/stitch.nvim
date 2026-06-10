@@ -15,6 +15,7 @@ local chrome = require('stitch.chrome')
 local viewwin = require('stitch.viewwin')
 local intent = require('stitch.intent')
 local srclang = require('stitch.lang')
+local synfall = require('stitch.syntax')
 
 local M = {}
 
@@ -452,6 +453,11 @@ local function decorate(buf, st, rows, lines)
       end
     end
   end
+
+  -- Legacy-syntax fallback regions for files without a Treesitter grammar.
+  -- Line-anchored, so they must follow every layout move — which is exactly
+  -- when decorate runs.
+  synfall.sync(buf, st, rows)
 end
 
 -- Paint st.view into the buffer: a clean re-render from the source model. The
@@ -571,6 +577,10 @@ function M.open(source)
   st.view = { title = source.title, files = files, files_by_name = by_name }
   st.baseline = baseline.new(buf, st.view)
 
+  -- Filetype before paint: setting it fires the Syntax autocmd (`:syn clear` +
+  -- runtime lookup), which would wipe the fallback syntax regions paint defines.
+  vim.bo[buf].filetype = 'stitch'
+
   paint(buf, st)
 
   -- 'acwrite' makes `:w` fire BufWriteCmd instead of writing a file named after
@@ -578,7 +588,6 @@ function M.open(source)
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
-  vim.bo[buf].filetype = 'stitch'
   pcall(vim.api.nvim_buf_set_name, buf, unique_name(source.title or 'list'))
   vim.bo[buf].modified = false
 

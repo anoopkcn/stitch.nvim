@@ -340,8 +340,15 @@ grammar, so a view mixing Lua, Python, and Markdown shows each line in the
 right colours. Each contiguous block is parsed in its own language (the grammar
 is derived from the filename — no LSP is started just to colour a stitch), so
 edited and newly-inserted lines are highlighted live from the buffer's own
-text. Files whose language has no Treesitter parser render uncoloured. Disable
-with |stitch-highlight| = `false`.
+text.
+
+Files whose language has no Treesitter parser (or no highlights query) fall
+back to their filetype's legacy regex syntax file — e.g. `kitty.conf` colours
+with the runtime's `syntax/kitty.vim`, exactly as its own buffer would. The
+filetype is resolved from an already-open buffer for the file when there is
+one (so ftdetect, modelines, and `:setf` are honoured), else by filename, else
+by content. A file with neither a grammar nor a syntax file renders
+uncoloured. Disable everything with |stitch-highlight| = `false`.
 
 Match highlighting~
 

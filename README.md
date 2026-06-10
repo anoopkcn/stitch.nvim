@@ -78,7 +78,7 @@ Defaults:
 ```lua
 require('stitch').setup({
   window = 'split',  -- 'split' | 'vsplit' | 'tab' | 'current'
-  highlight = true,  -- project Treesitter syntax highlighting onto stitches
+  highlight = true,  -- syntax highlighting (Treesitter, regex syntax fallback)
   context = 1,       -- initial source context lines above/below each match
   context_step = 1,  -- lines added/removed per +/- press (a count overrides it)
   max_results = 2000, -- cap on grep results (false disables the cap)
