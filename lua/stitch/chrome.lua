@@ -95,8 +95,8 @@ function M.header_parts(relname)
   return split_chunks(header_chunks(relname), #M.GUTTER)
 end
 
---- The gutter cell for a source line: its number, right-aligned, brighter for
---- a match line than for a context line.
+--- The gutter cell for a source line: its number, right-aligned, blue-tinted
+--- for a match line, dimmed for a context line.
 function M.lnum_cell(lnum, is_match)
   local hl = is_match and 'StitchLnum' or 'StitchContextLnum'
   return string.format('%%#%s#%5d %%*', hl, lnum)

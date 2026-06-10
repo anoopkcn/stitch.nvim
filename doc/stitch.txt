@@ -191,7 +191,7 @@ Layout:
   • Stitches are grouped by file under an underlined header showing the
     `{relative path}`, aligned to the left edge.
   • Each line shows its source line number in the left gutter.
-  • Match lines carry a brighter line number than surrounding context lines.
+  • Match lines carry a blue-tinted line number; context lines a dimmed one.
   • The matched span(s) get a translucent blue background on top of syntax
     highlighting.
   • Diagnostic (or other quickfix) messages appear as a trailing annotation.
@@ -472,7 +472,10 @@ StitchHeaderName~
 
                                                             *StitchLnum*
 StitchLnum~
-    Inline source line number on a match line. Default: links to |hl-LineNr|.
+    Inline source line number on a match line. Default: the |StitchMatch|
+    blue (`#61afef`), blended toward the editor background at 75% weight so
+    it ties the gutter to the match span without outshining it. Re-resolved
+    on |ColorScheme|.
 
                                                      *StitchContextLnum*
 StitchContextLnum~

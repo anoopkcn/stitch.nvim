@@ -59,7 +59,6 @@ local function setup_highlights()
   set('StitchHeaderDir', { fg = attr('Comment', 'fg'), underline = true, sp = usp })
   set('StitchHeaderName', { fg = attr('Comment', 'fg'), underline = true, sp = usp })
 
-  set('StitchLnum', { link = 'LineNr' })
   set('StitchContextLnum', { link = 'NonText' })
   set('StitchAnnotation', { link = 'Comment' })
   set('StitchSeparator', { link = 'NonText' })
@@ -77,6 +76,10 @@ local function setup_highlights()
   end
   local nbg = attr('Normal', 'bg') or (vim.o.background == 'light' and 0xffffff or 0x000000)
   set('StitchMatch', { bg = blend(0x61afef, nbg, 0.40) })
+  -- Match line numbers take the same blue, softened toward the background so
+  -- they tie the gutter to the match span without outshining it; context line
+  -- numbers stay dimmed (NonText) for contrast.
+  set('StitchLnum', { fg = blend(0x61afef, nbg, 0.60) })
 end
 setup_highlights()
 -- :colorscheme clears user-added groups, so re-resolve the header colours after.
@@ -288,7 +291,7 @@ end
 --- source line — via the paint baseline when the buffer is clean, or the live
 --- row→source map mid-edit (so inserted/split lines keep correct numbers); the
 --- diff only runs when the buffer is modified, so a clean redraw never pays for
---- a reconcile. Match lines get a brighter number than context lines; the
+--- a reconcile. Match lines get a blue-tinted number, context lines a dim one; the
 --- spacer and inserted lines get a blank pad.
 ---
 --- The file header and block divider are virtual lines drawn above their anchor

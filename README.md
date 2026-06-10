@@ -97,7 +97,7 @@ require('stitch').setup({
 | --------------------------- | ------------ |
 | `StitchHeaderDir`     | `Comment` fg, underlined (the dimmed directory) |
 | `StitchHeaderName`    | `Comment` fg, underlined (the file name, dimmed too) |
-| `StitchLnum`          | `LineNr`     |
+| `StitchLnum`          | blue-tinted fg (match line numbers, same blue as `StitchMatch`) |
 | `StitchContextLnum`   | `NonText`    |
 | `StitchMatch`         | translucent blue bg |
 | `StitchAnnotation`    | `Comment`    |
