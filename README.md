@@ -60,7 +60,7 @@ Inside the view:
 | Key     | Action                                   |
 | ------- | ---------------------------------------- |
 | `<CR>`  | open the source file at the line/cursor  |
-| `q`     | close the view                           |
+| `gq`    | close the view                           |
 | `+`     | show more context around this stitch    |
 | `-`     | show less context around this stitch    |
 | `:w`    | write all edits back to their source files |
@@ -84,7 +84,7 @@ require('stitch').setup({
   max_results = 2000, -- cap on grep results (false disables the cap)
   keys = {
     jump = '<CR>',
-    close = 'q',
+    close = 'gq',
     expand = '+',
     collapse = '-',
   },

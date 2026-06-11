@@ -25,7 +25,7 @@ M.defaults = {
   -- Buffer-local keymaps inside the stitch view.
   keys = {
     jump = '<CR>', -- open the source file at the line under the cursor
-    close = 'q', -- close the stitch view
+    close = 'gq', -- close the stitch view
     expand = '+', -- show more context around the stitch under the cursor
     collapse = '-', -- show less context around the stitch under the cursor
   },

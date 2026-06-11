@@ -79,7 +79,7 @@ Try it: >
     :Stitch diagnostics        " every project diagnostic
 <
 Inside the view: read down the buffer, press <CR> on any line to open its
-source, edit lines in place and `:w` to save them back, or `q` to close.
+source, edit lines in place and `:w` to save them back, or `gq` to close.
 
 ==============================================================================
 4. COMMANDS                                              *stitch-commands*
@@ -213,8 +213,8 @@ configurable via |stitch-keys|; set one to a false-y value to disable it.
             column. Reuses an existing window in the tab if there is one,
             otherwise opens a vertical split.
 
-                                                              *stitch_q*
-q           Close the view (closes the window, or deletes the buffer if it is
+                                                              *stitch_gq*
+gq          Close the view (closes the window, or deletes the buffer if it is
             the last window in the tab).
 
                                                               *stitch_+*
@@ -370,7 +370,7 @@ Pass options to |stitch.setup()| (or to lazy.nvim's `opts`). Defaults: >
       max_results = 2000, -- cap on grep results (false disables)
       keys = {
         jump = '<CR>',
-        close = 'q',
+        close = 'gq',
         expand = '+',
         collapse = '-',
       },
@@ -434,14 +434,14 @@ truncated. Set to `false` to disable the cap.
                                                             *stitch-keys*
 keys~
     Type: table
-    Default: { jump = '<CR>', close = 'q', expand = '+', collapse = '-' }
+    Default: { jump = '<CR>', close = 'gq', expand = '+', collapse = '-' }
 
 Buffer-local mappings inside the view. See |stitch-mappings| for what each
 does. Set a field to a false-y value to disable that mapping: >
     require('stitch').setup({
       keys = {
         jump = '<CR>',
-        close = '<Esc>',   -- close with Esc instead of q
+        close = '<Esc>',   -- close with Esc instead of gq
         expand = false,    -- disable expand
         collapse = false,  -- disable collapse
       },
