@@ -24,6 +24,7 @@
 -- module owns the *state* and the operations that move it.
 local model = require('stitch.model')
 local reconcile = require('stitch.reconcile')
+local intent = require('stitch.intent')
 
 local uv = vim.uv or vim.loop
 
@@ -107,6 +108,87 @@ function B:reset(lines, infos, src_by_file)
   self:capture_sync(src_by_file)
 end
 
+-- Is origin[r0..r1] one mapped, same-file, consecutive-lnum run? Every slide
+-- position inside such a run writes identical source content, so a hunk
+-- sliding only within it needs no re-anchoring.
+local function uniform(origin, r0, r1)
+  local first = origin[r0]
+  if not (first and first.lnum) then
+    return false
+  end
+  for r = r0 + 1, r1 do
+    local o = origin[r]
+    if not (o and o.lnum) or o.filename ~= first.filename or o.lnum ~= first.lnum + (r - r0) then
+      return false
+    end
+  end
+  return true
+end
+
+local function matches(o, want)
+  return (o and o.lnum and want and o.filename == want.filename and o.lnum == want.lnum) or false
+end
+
+-- Re-anchor slidable hunks to the side the user edited. xdiff reports a hunk
+-- bordered by equal lines at its LOWEST valid position, so a line pasted/typed
+-- at the end of a stitch that happens to equal the next stitch's first line
+-- (blank lines, `}`, `end`…) — or such a line deleted there — is silently
+-- attributed across the boundary below. The recorded insertion intent (the
+-- source line the cursor was on when the edit was made) says which side it
+-- belongs to; move the hunk to the slide position adjacent to that line. The
+-- map, the gutter/header layout, and write-back are all built from the
+-- normalized hunks, so display and save agree.
+function B:normalize_slides(hunks, current)
+  for _, h in ipairs(hunks) do
+    local ca, cb = h[2], h[4]
+    if ca == 0 and cb > 0 then
+      local lo, hi, sb_lo = reconcile.insert_slide(current, h)
+      if lo < hi and not uniform(self.origin, math.max(lo, 1), hi + 1) then
+        -- The rows' mark may sit at a previous tick's reported position
+        -- anywhere in the slide span; fall back to the live cursor line on
+        -- the first reconcile after the edit (no mark exists yet).
+        local want = intent.find(self.buf, sb_lo - 1, sb_lo + (hi - lo) + cb - 2)
+            or intent.cursor(self.buf)
+        if want then
+          for p = lo, hi do
+            if matches(self.origin[p], want) or matches(self.origin[p + 1], want) then
+              h[1], h[3] = p, sb_lo + (p - lo)
+              -- The chosen row must carry the resolution so the next diff,
+              -- the header walk, and write-back all land on the same side.
+              intent.put(self.buf, h[3] - 1, want)
+              break
+            end
+          end
+        end
+      end
+    elseif cb == 0 and ca > 0 then
+      local lo, hi = reconcile.delete_slide(self.snapshot, h)
+      if lo < hi and not uniform(self.origin, lo, hi + ca - 1) then
+        -- No buffer row survives a deletion to carry a mark; lock the
+        -- decision at first sight against the snapshot-stable key (the
+        -- cursor_ref is only trustworthy right after the deletion).
+        local key = lo .. ':' .. ca
+        local want = intent.recall(self.buf, key, self.gen)
+        if want == nil then
+          want = intent.cursor(self.buf) or false
+          intent.remember(self.buf, key, self.gen, want)
+        end
+        if want then
+          for p = lo, hi do
+            -- The cursor line is the run's first deleted line (dd, dj) or its
+            -- last (dk); either pins the position.
+            if matches(self.origin[p], want) or matches(self.origin[p + ca - 1], want) then
+              h[3] = h[3] + (p - h[1])
+              h[1] = p
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
 -- The cached reconciliation entry: { tick, map, hunks, current }. Recomputed
 -- on a changedtick miss, so a `:w` landing on the same tick a redraw already
 -- filled reuses the one entry.
@@ -119,7 +201,9 @@ function B:entry()
     return self.live
   end
   local current = vim.api.nvim_buf_get_lines(self.buf, 0, -1, false)
-  local r = reconcile.compute(self.snapshot, current, self.origin)
+  local r = reconcile.compute(self.snapshot, current, self.origin, function(hunks)
+    self:normalize_slides(hunks, current)
+  end)
   self.live = { tick = tick, map = r.map, hunks = r.hunks, current = current }
   return self.live
 end

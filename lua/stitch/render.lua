@@ -178,6 +178,15 @@ local function update_commentstring(buf)
   if st and st.cs_row == row and st.cs_tick == tick then
     return
   end
+  -- After a structural edit the anchors are stale until redecorate runs — and
+  -- CursorMoved fires BEFORE TextChanged, so a line pasted at a boundary still
+  -- carries the *next* line's anchor (a row insertion doesn't move a
+  -- right_gravity=false mark sitting on that row). Reading it here would
+  -- record the wrong side as the insertion intent; leave cursor_ref at the
+  -- line the cursor was on when the edit was made, which is the intent.
+  if st and st.decorated_count ~= vim.api.nvim_buf_line_count(buf) then
+    return
+  end
   local rec = M.record_at(buf, row)
   if rec then
     local cs = srclang.commentstring(rec.filename)

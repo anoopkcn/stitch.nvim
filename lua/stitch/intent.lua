@@ -58,6 +58,72 @@ function M.tag(buf, row)
   return s.cursor_ref
 end
 
+--- The source line currently under the cursor (read-only), or nil. The
+--- baseline's slide normalization falls back to this on the first reconcile
+--- after an edit, before any mark exists for it.
+function M.cursor(buf)
+  local s = M.state[buf]
+  return s and s.cursor_ref or nil
+end
+
+--- First usable tagged reference on any row in [row0, row1] (0-based,
+--- inclusive), or nil. A slid insertion's mark may sit at a previous tick's
+--- reported position anywhere in the hunk's slide span, so readers scan the
+--- whole span rather than one row.
+function M.find(buf, row0, row1)
+  local s = M.state[buf]
+  if not s then
+    return nil
+  end
+  row1 = math.min(row1, vim.api.nvim_buf_line_count(buf) - 1)
+  if row1 < row0 then
+    return nil
+  end
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, { row0, 0 }, { row1, -1 }, {})) do
+    if s.marks[m[1]] then
+      return s.marks[m[1]]
+    end
+  end
+  return nil
+end
+
+--- Tag `row` (0-based) with `ref` directly, upgrading an existing mark on the
+--- row rather than duplicating it. Used when the baseline re-anchors a slid
+--- insertion: the chosen row must carry the resolved reference so write-back
+--- (edit.plan_hunk's intent.at) and the header walk agree with the map.
+function M.put(buf, row, ref)
+  local s = state_of(buf)
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, { row, 0 }, { row, -1 }, {})) do
+    if s.marks[m[1]] ~= nil then
+      s.marks[m[1]] = ref
+      return
+    end
+  end
+  local id = vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { right_gravity = false })
+  s.marks[id] = ref
+end
+
+--- Deletion decisions: a deleted line leaves no buffer row to carry a mark,
+--- so a slid deletion's resolution is remembered against its snapshot-stable
+--- key instead, locked at first sight (the only moment cursor_ref still
+--- reflects where the deletion was made). `ref` may be false ("resolved:
+--- intent unknown, keep the raw position") — recall returns it as stored, or
+--- nil when nothing was decided for this key/gen.
+function M.remember(buf, key, gen, ref)
+  local s = state_of(buf)
+  s.dels = s.dels or {}
+  s.dels[key] = { gen = gen, ref = ref }
+end
+
+function M.recall(buf, key, gen)
+  local s = M.state[buf]
+  local d = s and s.dels and s.dels[key]
+  if d and d.gen == gen then
+    return d.ref
+  end
+  return nil
+end
+
 --- Read-only intent of a row (0-based): the { filename, lnum } it was tagged
 --- with, or nil. A `false` tag (unknown reference) reads as nil here — readers
 --- only want a usable reference.
@@ -82,6 +148,7 @@ function M.reset(buf)
   local s = M.state[buf]
   if s then
     s.marks = {}
+    s.dels = nil
   else
     M.state[buf] = { marks = {} }
   end

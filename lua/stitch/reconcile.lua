@@ -20,15 +20,22 @@ local M = {}
 --- @param current string[] the current buffer lines (1-based)
 --- @param origin table[] origin[i] = source info for snapshot row i, or false
 ---        (e.g. origin[1] = false, the row-0 spacer)
+--- @param normalize? fun(hunks: table[]) optional hunk rewriter, called between
+---        the diff and the map walk (the baseline re-anchors slidable hunks to
+---        the side the user edited; see insert_slide/delete_slide). May mutate
+---        the hunks in place; the map is built from the result.
 --- @return table { map, hunks } where
 ---   map[i]  = source info for *current* row i, or false (spacer/inserted/unmapped)
 ---   hunks   = raw vim.diff indices: list of { start_a, count_a, start_b, count_b }
-function M.compute(snapshot, current, origin)
+function M.compute(snapshot, current, origin, normalize)
   local hunks = vim.diff(
     table.concat(snapshot, '\n') .. '\n',
     table.concat(current, '\n') .. '\n',
     { result_type = 'indices' }
   )
+  if normalize then
+    normalize(hunks)
+  end
   local map = {}
   local si, ci = 1, 1 -- 1-based snapshot / current positions
   for _, h in ipairs(hunks) do
@@ -61,6 +68,48 @@ function M.compute(snapshot, current, origin)
     si, ci = si + 1, ci + 1
   end
   return { map = map, hunks = hunks }
+end
+
+-- A hunk bordered by equal lines is positionally ambiguous: inserting (or
+-- deleting) `}` next to an existing `}` yields the same buffer wherever in the
+-- equal run the hunk is placed, and xdiff reports it at the LOWEST valid
+-- position. When the run straddles a stitch/file boundary that choice decides
+-- which source file receives the edit, so the baseline re-anchors such hunks
+-- by the user's recorded intent. These two helpers compute the valid range.
+
+--- The slide range of a pure-insertion hunk {sa, 0, sb, cb}: every position
+--- the inserted block can occupy while producing the identical buffer.
+--- Sliding up one step is valid when the line above the block equals the
+--- block's last line; down when the line below equals its first (the block
+--- "rotates" through the equal run). Returns (sa_lo, sa_hi, sb_lo): the
+--- inclusive range of start_a values, plus start_b at the low end (start_b for
+--- position p is sb_lo + (p - sa_lo)).
+function M.insert_slide(current, hunk)
+  local sa, _, sb, cb = hunk[1], hunk[2], hunk[3], hunk[4]
+  local sa_lo, sb_lo = sa, sb
+  while sb_lo > 1 and current[sb_lo - 1] == current[sb_lo + cb - 1] do
+    sa_lo, sb_lo = sa_lo - 1, sb_lo - 1
+  end
+  local sa_hi, sb_hi = sa, sb
+  while sb_hi + cb <= #current and current[sb_hi + cb] == current[sb_hi] do
+    sa_hi, sb_hi = sa_hi + 1, sb_hi + 1
+  end
+  return sa_lo, sa_hi, sb_lo
+end
+
+--- The slide range of a pure-deletion hunk {sa, ca, sb, 0}: every start_a the
+--- deleted block can take while removing the same buffer text. Returns
+--- (sa_lo, sa_hi); start_b moves with start_a by the same delta.
+function M.delete_slide(snapshot, hunk)
+  local sa, ca = hunk[1], hunk[2]
+  local lo, hi = sa, sa
+  while lo > 1 and snapshot[lo - 1] == snapshot[lo + ca - 1] do
+    lo = lo - 1
+  end
+  while hi + ca <= #snapshot and snapshot[hi + ca] == snapshot[hi] do
+    hi = hi + 1
+  end
+  return lo, hi
 end
 
 --- Decompose the live row→source map into blocks: maximal runs of rows that
