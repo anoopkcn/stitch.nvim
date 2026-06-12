@@ -237,6 +237,17 @@ function M.save(buf)
   end
   local current, hunks, origin = R.current, R.hunks, R.origin
 
+  -- A no-op :w must not advance the baseline: the in-place advance branch
+  -- refreshes the drift markers from current source while the snapshot stays
+  -- put, which would silently mute drift detection after an external source
+  -- edit. Nothing to write — just confirm and clear the flag (the buffer
+  -- matches the snapshot exactly).
+  if #hunks == 0 then
+    vim.bo[buf].modified = false
+    vim.notify('stitches: no changes to write', vim.log.levels.INFO)
+    return
+  end
+
   -- Group mappable hunks by source file; flag the rest.
   local by_file, order, all_plans, unmappable = {}, {}, {}, 0
   for _, h in ipairs(hunks) do
@@ -314,14 +325,16 @@ function M.save(buf)
   -- displayed line numbers below it shifted and the view must be re-laid-out.
   -- Advance the baseline by what was applied; it keeps the view model and the
   -- drift markers in lockstep and decides the display work: a clean structural
-  -- save needs a full re-layout, a clean in-place save advances in place (undo
-  -- survives), a partial save splices just the applied hunks so the next :w
-  -- doesn't re-plan them — and the un-written edits (with their inline flags)
-  -- stay in the buffer for the user to resolve and save again.
+  -- save needs a full re-layout, a clean in-place save advances in place, a
+  -- partial save splices just the applied hunks so the next :w doesn't
+  -- re-plan them — and the un-written edits (with their inline flags) stay in
+  -- the buffer for the user to resolve and save again. Undo survives every
+  -- branch (the 'advance' repaint leaves the buffer text untouched), so `u`
+  -- past a save and a second `:w` revert the written change.
   local clean = (unmappable == 0 and diverged == 0)
   local action = st.baseline:advance(all_plans, current, clean)
   if action == 'repaint' then
-    render.repaint(buf) -- re-render from saved source (this relayout clears undo)
+    render.repaint(buf, { kind = 'advance' }) -- re-render from saved source (same text, fresh anchors)
   elseif action == 'redecorate' then
     render.redecorate(buf) -- give spliced-in rows their anchors
   end

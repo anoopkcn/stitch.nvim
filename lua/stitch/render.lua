@@ -471,19 +471,52 @@ local function decorate(buf, st, rows, lines)
   synfall.sync(buf, st, rows)
 end
 
+-- The buffer already shows exactly `lines`?
+local function buffer_equals(buf, lines)
+  if vim.api.nvim_buf_line_count(buf) ~= #lines then
+    return false
+  end
+  local cur = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for i = 1, #lines do
+    if cur[i] ~= lines[i] then
+      return false
+    end
+  end
+  return true
+end
+
 -- Paint st.view into the buffer: a clean re-render from the source model. The
 -- buffer text is pure source; all metadata is carried by extmarks (see
 -- decorate). Resets st.baseline — snapshot, per-row origin, drift markers —
 -- which is what write-back and the live row→source map diff against.
-local function paint(buf, st)
+--
+-- opts.kind says why we are painting:
+--   'initial'  first render (M.open): nothing predates the view, so the wipe
+--              below makes the painted text the undo floor.
+--   'model'    the view model changed (expand/collapse, drift sync): the text
+--              genuinely changes and anchors are placed manually, so this op
+--              is non-undoable — crossing it with `u` would desync text from
+--              the baseline and make write-back unsafe.
+--   'advance'  relayout after a clean structural save (edit.save): the buffer
+--              already shows exactly what a fresh render produces — its edits
+--              were just written to source and the ranges moved by exactly
+--              those edits — so skip the rewrite entirely. No text change
+--              means undo history survives the save; `u` below it diffs
+--              against the advanced baseline as reverse edits, so a second
+--              `:w` reverts the written change, mirroring the in-place path.
+local function paint(buf, st, opts)
   local lines, infos, src_by_file = build_infos(st)
 
-  -- Disable undo across the (re)layout: anchors are placed manually and can't
-  -- survive an undo, so this view op is intentionally non-undoable.
   vim.bo[buf].modifiable = true
-  local save_undolevels = vim.bo[buf].undolevels
-  vim.bo[buf].undolevels = -1
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  if not ((opts and opts.kind == 'advance') and buffer_equals(buf, lines)) then
+    -- Disable undo across the (re)layout (see opts.kind above; an 'advance'
+    -- paint only lands here if its text unexpectedly differs from the buffer,
+    -- where the wipe is the safe known behavior).
+    local save_undolevels = vim.bo[buf].undolevels
+    vim.bo[buf].undolevels = -1
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].undolevels = save_undolevels
+  end
 
   -- Fresh baseline (the lines read by build_infos seed the drift markers, so
   -- nothing is read twice). Every line now maps to source, so there are no
@@ -495,7 +528,6 @@ local function paint(buf, st)
   st.decorated_count = #lines
   st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
 
-  vim.bo[buf].undolevels = save_undolevels
   vim.bo[buf].modified = false
 end
 
@@ -513,6 +545,24 @@ function M.redecorate(buf)
     st.decorated_count = vim.api.nvim_buf_line_count(buf)
     st.decorated_tick = vim.api.nvim_buf_get_changedtick(buf)
   end
+end
+
+--- Does the view hold unsaved edits a repaint would discard? 'modified' alone
+--- can lie: undoing past a save restores the flag from before the edit (often
+--- false) while the text now differs from the advanced baseline — those
+--- unsaved reverse edits must count as dirty or a model repaint (sync,
+--- expand/collapse) would silently throw them away. reconcile() is one
+--- vim.diff cached per changedtick, so the extra check is cheap.
+function M.dirty(buf)
+  if vim.bo[buf].modified then
+    return true
+  end
+  local st = M.state[buf]
+  if not st or not st.baseline or not st.baseline.snapshot then
+    return false
+  end
+  local e = st.baseline:reconcile()
+  return e ~= nil and #e.hunks > 0
 end
 
 --- Reconcile the view with its source files when they changed underneath it
@@ -537,7 +587,7 @@ function M.sync(buf)
     return
   end
 
-  if vim.bo[buf].modified then
+  if M.dirty(buf) then
     if not st.stale then
       st.stale = true
       vim.notify(
@@ -553,7 +603,7 @@ function M.sync(buf)
   local saved = (vim.api.nvim_win_get_buf(win) == buf) and vim.fn.winsaveview() or nil
   local ok, err = pcall(function()
     st.baseline:absorb(diverged) -- rebase the model (foreign boundary inserts stay hidden)
-    paint(buf, st) -- repaints and resets the baseline (drift markers included)
+    paint(buf, st, { kind = 'model' }) -- repaints and resets the baseline (drift markers included)
   end)
   -- Always clear the guard: a paint that threw must not wedge sync off for the
   -- buffer's whole life.
@@ -592,7 +642,7 @@ function M.open(source)
   -- runtime lookup), which would wipe the fallback syntax regions paint defines.
   vim.bo[buf].filetype = 'stitch'
 
-  paint(buf, st)
+  paint(buf, st, { kind = 'initial' })
 
   -- 'acwrite' makes `:w` fire BufWriteCmd instead of writing a file named after
   -- the buffer; the editor module turns that into per-source-file writes.
@@ -674,7 +724,7 @@ end
 
 --- Re-lay-out the view after a level change, preserving edits and the cursor's
 --- source line.
-function M.repaint(buf)
+function M.repaint(buf, opts)
   local st = M.state[buf]
   if not st then
     return
@@ -685,7 +735,7 @@ function M.repaint(buf)
     cursor_rec = M.record_at(buf, vim.api.nvim_win_get_cursor(win)[1] - 1)
   end
 
-  paint(buf, st)
+  paint(buf, st, opts)
 
   if cursor_rec and vim.api.nvim_win_get_buf(win) == buf then
     local target = row_for(buf, st, cursor_rec.filename, cursor_rec.lnum)

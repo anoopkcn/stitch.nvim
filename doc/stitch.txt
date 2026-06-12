@@ -256,9 +256,11 @@ Two guarantees bound what is written:
     `‹ cannot map edit (spans files/blocks) — not written ›` and skipped rather
     than guessed at.
 
-A clean save re-renders the view (fresh line numbers; this clears undo). A save
-with skips keeps the buffer and its inline flags so you can resolve the conflict
-and save again.
+A clean save re-renders the view (fresh line numbers) without touching the
+buffer text, so undo history survives: press `u` after `:w` to bring the
+change back into the view, and `:w` again to revert it in the source files
+(redo + `:w` re-applies it). A save with skips keeps the buffer and its inline
+flags so you can resolve the conflict and save again.
 
 After `:w` a summary is shown, e.g.: >
     stitches: wrote 3 edit(s) in 2 file(s)

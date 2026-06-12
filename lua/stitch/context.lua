@@ -33,8 +33,10 @@ local function adjust(buf, count, sign)
   render.sync(buf)
 
   -- Expand/collapse re-lays-out the buffer, which can't preserve structural
-  -- (multi-line / insert / delete) edits. Require a clean buffer first.
-  if vim.bo[buf].modified then
+  -- (multi-line / insert / delete) edits. Require a clean buffer first —
+  -- render.dirty, not 'modified', because undoing past a save leaves unsaved
+  -- reverse edits with the flag off.
+  if render.dirty(buf) then
     vim.notify('stitches: write (:w) before expand/collapse', vim.log.levels.WARN)
     return
   end
@@ -93,7 +95,7 @@ local function adjust(buf, count, sign)
   end
 
   if removed or range.s ~= old_s or range.e ~= old_e then
-    render.repaint(buf)
+    render.repaint(buf, { kind = 'model' })
   end
 end
 
