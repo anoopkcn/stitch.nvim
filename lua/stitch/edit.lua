@@ -98,6 +98,10 @@ end
 -- source changes (one per contiguous same-file run), or ({}, brow) when it can't
 -- be mapped. A hunk can coalesce edits across file boundaries (e.g. commenting
 -- adjacent lines from different files), so a single hunk may yield several plans.
+-- The third return, `skipped`, lists buffer rows (0-based) whose change had no
+-- source line to receive it (the row-0 spacer, or a not-yet-saved inserted
+-- line caught in the region) — a whole-buffer `:%s/^/…/` hits the spacer too,
+-- and that one row must not sink the hunk's mappable runs with it.
 --
 -- Each plan replaces source lines [l0, l1] (1-based) of `filename` with
 -- `newlines`; l1 == l0 - 1 means a pure insertion before l0. Plans also carry
@@ -176,31 +180,41 @@ local function plan_hunk(hunk, origin, current, buf)
   if ca ~= cb and cb ~= 0 then
     return {}, brow
   end
-  local plans = {}
+  local plans, skipped = {}, {}
   local i = sa
   while i <= sa + ca - 1 do
-    local j = i
-    while j + 1 <= sa + ca - 1 and source_range(origin, i, j + 1) do
-      j = j + 1
-    end
-    local run = source_range(origin, i, j)
-    if not run then
-      return {}, brow -- a non-source row sits in the region
-    end
-    if cb == 0 then
-      run.newlines = {}
-      run.brow = brow
-    else
-      run.newlines = {}
-      for k = i, j do
-        run.newlines[#run.newlines + 1] = current[sb + (k - sa)]
+    local o = origin[i]
+    if not (o and o.lnum) then
+      -- A row with no source behind it. In the aligned cases handled here
+      -- (1:1 replace, pure deletion) it pairs with at most one new row, so
+      -- skipping it leaves the surrounding runs intact; its own change has
+      -- nowhere to go and is reported back for the caller to flag.
+      local row = (cb == 0) and brow or math.max(0, sb + (i - sa) - 1)
+      if skipped[#skipped] ~= row then
+        skipped[#skipped + 1] = row
       end
-      run.brow = math.max(0, sb + (i - sa) - 1)
+      i = i + 1
+    else
+      local j = i
+      while j + 1 <= sa + ca - 1 and source_range(origin, i, j + 1) do
+        j = j + 1
+      end
+      local run = source_range(origin, i, j) -- origin[i] is mapped, so this holds
+      if cb == 0 then
+        run.newlines = {}
+        run.brow = brow
+      else
+        run.newlines = {}
+        for k = i, j do
+          run.newlines[#run.newlines + 1] = current[sb + (k - sa)]
+        end
+        run.brow = math.max(0, sb + (i - sa) - 1)
+      end
+      plans[#plans + 1] = run
+      i = j + 1
     end
-    plans[#plans + 1] = run
-    i = j + 1
   end
-  return plans
+  return plans, brow, skipped
 end
 
 -- Current source [l0, l1] still matches the text we painted from?
@@ -251,10 +265,17 @@ function M.save(buf)
   -- Group mappable hunks by source file; flag the rest.
   local by_file, order, all_plans, unmappable = {}, {}, {}, 0
   for _, h in ipairs(hunks) do
-    local plans, brow = plan_hunk(h, origin, current, buf)
-    if #plans == 0 then
+    local plans, brow, skipped = plan_hunk(h, origin, current, buf)
+    skipped = skipped or {}
+    if #plans == 0 and #skipped == 0 then
       unmappable = unmappable + 1
       flag(buf, brow, 'cannot map edit (spans files/blocks) — not written')
+    end
+    -- Rows with no source behind them (see plan_hunk): their change stays in
+    -- the buffer, flagged, while the hunk's mappable runs are still written.
+    for _, row in ipairs(skipped) do
+      unmappable = unmappable + 1
+      flag(buf, row, 'no source line here — not written')
     end
     for _, plan in ipairs(plans) do
       local f = by_file[plan.filename]

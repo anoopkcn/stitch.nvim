@@ -293,6 +293,36 @@ check('I4: expand widens the block',
   buf_lines())
 
 ------------------------------------------------------------------
+-- Scenario J: a substitution that also hits the row-0 spacer (e.g.
+-- :%s/^/…/ over the whole buffer) must still write every real line —
+-- only the spacer row is flagged, not the whole coalesced hunk
+------------------------------------------------------------------
+config.setup({ context = 1, window = 'current', highlight = false })
+vim.cmd('only')
+vim.cmd('enew')
+local fileJ = mkfile('j.txt', 'J')
+local bufJ = open_view(fileJ)
+vim.cmd('%s/^/> /') -- one hunk covering the spacer and both blocks
+notes = {}
+edit.save(bufJ)
+local diskJ = vim.fn.readfile(fileJ)
+check('J1: all real lines written despite the spacer edit',
+  diskJ[2] == '> J line 2' and diskJ[4] == '> J line 4'
+  and diskJ[8] == '> J line 8' and diskJ[10] == '> J line 10',
+  { disk = diskJ, notes = notes })
+check('J1: hidden lines untouched', diskJ[1] == 'J line 1' and diskJ[5] == 'J line 5', diskJ)
+check('J1: spacer edit reported as skipped',
+  note_matching('wrote 2 edit(s)') ~= nil and note_matching('skipped (unmappable)') ~= nil, notes)
+check('J1: buffer stays modified (spacer edit unsaved)', vim.bo[bufJ].modified)
+
+-- Restoring the spacer converges to a clean no-op save.
+vim.api.nvim_buf_set_lines(bufJ, 0, 1, false, { '' })
+notes = {}
+edit.save(bufJ)
+check('J2: converges clean after restoring the spacer',
+  note_matching('no changes to write') ~= nil and not vim.bo[bufJ].modified, notes)
+
+------------------------------------------------------------------
 print(table.concat(results, '\n'))
 print(failed == 0 and 'ALL PASS' or (failed .. ' FAILURE(S)'))
 if failed > 0 then os.exit(1) end
