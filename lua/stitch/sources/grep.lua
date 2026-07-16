@@ -28,10 +28,12 @@ function M.run(pattern, present)
     -- and the byte offsets of every submatch on that line, which become the exact
     -- highlight span (col..end_col) for each quickfix item. Parsing stops at
     -- max_results: past it, every further item only grows an unusably large view
-    -- (and each unique file costs a full read at paint).
+    -- (and each unique file costs a full read at paint). gmatch iterates the
+    -- output lazily, so a capped parse of a huge result never materializes the
+    -- whole output as a table the way vim.split would.
     local max = require('stitch.config').options.max_results
     local items, truncated = {}, false
-    for _, line in ipairs(vim.split(result.stdout or '', '\n', { trimempty = true })) do
+    for line in (result.stdout or ''):gmatch('[^\n]+') do
       if max and #items >= max then
         truncated = true
         break

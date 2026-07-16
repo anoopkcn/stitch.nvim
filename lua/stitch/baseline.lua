@@ -220,15 +220,12 @@ function B:reconcile()
 end
 
 --- Per-row source info for the *current* buffer rows: map[r+1] is the info
---- for row r, or false. A clean buffer is the baseline itself, so this costs
---- nothing; a modified buffer pays one cached diff per changedtick.
+--- for row r, or false. One vim.diff cached per changedtick. 'modified' is
+--- deliberately not consulted as a shortcut: undoing past a save turns the
+--- flag off while the text still differs from the advanced baseline (see
+--- render.dirty), and handing out the stale origin then misnumbers the gutter
+--- and misplaces highlights.
 function B:map()
-  if not self.snapshot then
-    return nil
-  end
-  if not vim.bo[self.buf].modified then
-    return self.origin
-  end
   local e = self:entry()
   return e and e.map or nil
 end
@@ -316,6 +313,17 @@ function B:splice(applied)
   self.live = nil -- changedtick didn't move; a stale cached diff would replay the old hunks
   self.gen = self.gen + 1
 
+  self:advance_markers(applied)
+end
+
+-- Advance the drift markers of exactly the files the applied plans wrote,
+-- by exactly those edits. If the result matches the file's actual content our
+-- write was the only change and the marker moves with it; otherwise the file
+-- *also* drifted externally and the marker stays stale so drift() still sees
+-- it. Files the save didn't touch keep their markers untouched — re-capturing
+-- them wholesale would silently absorb any external drift they accumulated
+-- while the view still displays the old text.
+function B:advance_markers(applied)
   local by_file = {}
   for _, p in ipairs(applied) do
     by_file[p.filename] = by_file[p.filename] or {}
@@ -388,8 +396,11 @@ function B:advance(plans, current, clean)
     return 'repaint'
   elseif clean then
     -- Pure in-place: the buffer already shows the final text and line numbers
-    -- are unchanged. Advance the rows without re-laying-out and refresh the
-    -- drift markers so our own write doesn't read back as external change.
+    -- are unchanged. Advance the rows without re-laying-out, and move only the
+    -- written files' drift markers so our own write doesn't read back as
+    -- external change. (Not capture_sync(): re-capturing every file would
+    -- absorb external drift in files this save never touched, leaving the
+    -- view stale with drift() blind to it.)
     for i, o in pairs(self.origin) do
       if o and o.lnum then
         o.source = current[i]
@@ -398,7 +409,7 @@ function B:advance(plans, current, clean)
     self.snapshot = current
     self.live = nil
     self.gen = self.gen + 1
-    self:capture_sync()
+    self:advance_markers(applied)
     return nil
   end
 

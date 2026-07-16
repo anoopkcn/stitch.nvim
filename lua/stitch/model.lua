@@ -277,6 +277,14 @@ function M.from_items(items, title)
     if lnum and lnum > 0 then
       local fname = resolve_filename(it)
       if fname then
+        -- Anchor the name to an absolute path now (URL-like names pass
+        -- through untouched): everything downstream re-resolves it later —
+        -- write-back's bufadd, the drift markers' fs_stat, repaint's reads —
+        -- and a `:cd` in between would silently point a relative name at a
+        -- different file. Also dedupes relative/absolute spellings of one file.
+        if not fname:find('://', 1, true) then
+          fname = vim.fn.fnamemodify(fname, ':p')
+        end
         local f = by_file[fname]
         if not f then
           f = {
@@ -309,8 +317,13 @@ function M.from_items(items, title)
   for _, fname in ipairs(order) do
     local f = by_file[fname]
     table.sort(f.match_lnums)
-    f.line_count = #read_lines(f.filename, f.bufnr)
+    -- Keep the lines read for line_count: render.open paints immediately
+    -- after this and consumes them (f.src_lines, cleared on first use), so
+    -- opening a view costs one read per file instead of two.
+    local lines = read_lines(f.filename, f.bufnr)
+    f.line_count = #lines
     if f.line_count > 0 then -- skip unreadable/empty files
+      f.src_lines = lines
       files[#files + 1] = f
     end
   end

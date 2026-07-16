@@ -58,16 +58,16 @@ local function layout(buf, st)
   if st.hl_layout and st.hl_layout.tick == tick and st.hl_layout.gen == b.gen then
     return st.hl_layout
   end
-  local map, hunks
-  if vim.bo[buf].modified then
-    local R = b:reconcile()
-    if not R then
-      return nil
-    end
-    map, hunks = R.map, R.hunks
-  else
-    map, hunks = b.origin, {} -- clean buffer: rows are the baseline, no diff needed
+  -- Always the reconciled map, never a 'modified'-gated shortcut to b.origin:
+  -- undo past a save clears the flag while the text differs from the advanced
+  -- baseline, and projecting from the stale origin then paints the wrong rows.
+  -- The reconcile is one vim.diff cached per changedtick, shared with the
+  -- gutter and write-back.
+  local R = b:reconcile()
+  if not R then
+    return nil
   end
+  local map, hunks = R.map, R.hunks
   if not map then
     return nil
   end

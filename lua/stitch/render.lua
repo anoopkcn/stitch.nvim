@@ -237,7 +237,10 @@ local function build_infos(st)
   -- drift markers — otherwise every (re)paint reads every file twice.
   local src_by_file = {}
   for fi, f in ipairs(st.view.files) do
-    local src_lines = model.read_lines(f.filename, f.bufnr)
+    -- model.from_items leaves the lines it already read in f.src_lines; the
+    -- first paint consumes them (one read per file at open), repaints re-read.
+    local src_lines = f.src_lines or model.read_lines(f.filename, f.bufnr)
+    f.src_lines = nil
     src_by_file[f.filename] = src_lines
     local blocks = model.materialize(f, src_lines)
     for bi, block in ipairs(blocks) do

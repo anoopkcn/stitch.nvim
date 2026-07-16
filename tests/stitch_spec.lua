@@ -323,6 +323,75 @@ check('J2: converges clean after restoring the spacer',
   note_matching('no changes to write') ~= nil and not vim.bo[bufJ].modified, notes)
 
 ------------------------------------------------------------------
+-- Scenario K: a clean in-place save must not mute drift detection for
+-- files the save didn't write (advance must move only the written
+-- files' markers, not re-capture every file)
+------------------------------------------------------------------
+config.setup({ context = 1, window = 'current', highlight = false })
+vim.cmd('only')
+vim.cmd('enew')
+local fileK1 = mkfile('k1.txt', 'K1')
+local fileK2 = mkfile('k2.txt', 'K2')
+local srcK = model.from_items({
+  { filename = fileK1, lnum = 3, col = 1, text = 'x' },
+  { filename = fileK2, lnum = 3, col = 1, text = 'x' },
+}, 'k')
+local bufK = render.open(srcK)
+-- rows: 1 spacer, 2..4 = k1 2..4, 5..7 = k2 2..4
+;(vim.uv or vim.loop).sleep(20) -- move k2's mtime past the captured marker
+local k2lines = vim.fn.readfile(fileK2)
+k2lines[2] = 'K2 line 2 DRIFTED'
+vim.fn.writefile(k2lines, fileK2)
+vim.api.nvim_buf_set_lines(bufK, 1, 2, false, { 'K1 line 2 EDITED' }) -- in-place, k1 only
+notes = {}
+edit.save(bufK)
+check('K1: clean in-place save wrote k1', vim.fn.readfile(fileK1)[2] == 'K1 line 2 EDITED', notes)
+notes = {}
+render.sync(bufK)
+check('K2: k2 drift still detected and absorbed after the save',
+  vim.tbl_contains(vim.api.nvim_buf_get_lines(bufK, 0, -1, false), 'K2 line 2 DRIFTED'),
+  vim.api.nvim_buf_get_lines(bufK, 0, -1, false))
+
+------------------------------------------------------------------
+-- Scenario L: relative item paths are anchored at open — a later :cd
+-- must not redirect write-back (or the drift stat) to another file
+------------------------------------------------------------------
+local ldir = dir .. '/ldir'
+vim.fn.mkdir(ldir .. '/sub', 'p')
+vim.fn.writefile({ 'L1', 'L2', 'L3' }, ldir .. '/l.txt')
+vim.fn.writefile({ 'L1', 'L2', 'L3' }, ldir .. '/sub/l.txt') -- decoy at the new cwd
+local prev_cwd = vim.fn.getcwd()
+vim.cmd('cd ' .. vim.fn.fnameescape(ldir))
+local srcL = model.from_items({ { filename = 'l.txt', lnum = 2, col = 1, text = 'L2' } }, 'l')
+local bufL = render.open(srcL)
+vim.cmd('cd ' .. vim.fn.fnameescape(ldir .. '/sub'))
+vim.api.nvim_buf_set_lines(bufL, 2, 3, false, { 'L2 EDITED' })
+edit.save(bufL)
+vim.cmd('cd ' .. vim.fn.fnameescape(prev_cwd))
+check('L1: original file written despite :cd',
+  vim.fn.readfile(ldir .. '/l.txt')[2] == 'L2 EDITED', vim.fn.readfile(ldir .. '/l.txt'))
+check('L1: decoy at the new cwd untouched',
+  vim.fn.readfile(ldir .. '/sub/l.txt')[2] == 'L2', vim.fn.readfile(ldir .. '/sub/l.txt'))
+
+------------------------------------------------------------------
+-- Scenario N: the row→source map stays live after undoing past a
+-- structural save ('modified' reads false while the text differs
+-- from the advanced baseline)
+------------------------------------------------------------------
+vim.cmd('only')
+vim.cmd('enew')
+local fileN = mkfile('n.txt', 'N')
+local bufN = open_view(fileN)
+vim.api.nvim_buf_set_lines(bufN, 3, 3, false, { 'N NEW' }) -- insert inside block 1
+edit.save(bufN) -- clean structural save; the 'advance' repaint keeps undo
+vim.cmd('normal! u') -- buffer shrinks by one row; flag may read unmodified
+local mapN = render.state[bufN].baseline:map()
+check('N1: map length tracks the buffer after undo past save',
+  mapN ~= nil and #mapN == vim.api.nvim_buf_line_count(bufN),
+  { rows = vim.api.nvim_buf_line_count(bufN), maplen = mapN and #mapN,
+    modified = vim.bo[bufN].modified })
+
+------------------------------------------------------------------
 print(table.concat(results, '\n'))
 print(failed == 0 and 'ALL PASS' or (failed .. ' FAILURE(S)'))
 if failed > 0 then os.exit(1) end
